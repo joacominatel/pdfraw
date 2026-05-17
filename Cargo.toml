@@ -2,5 +2,45 @@
 name = "pdf_extractor"
 version = "0.1.0"
 edition = "2024"
+rust-version = "1.85"
+license = "MIT OR Apache-2.0"
+description = "Layout-preserving PDF text extraction in pure Rust (pdfplumber-inspired)"
+keywords = ["pdf", "extraction", "text", "layout", "invoice"]
+categories = ["text-processing", "parsing"]
+
+[lib]
+name = "pdf_extractor"
+path = "src/lib.rs"
 
 [dependencies]
+lopdf       = { version = "0.40", default-features = false }
+thiserror   = "2"
+compact_str = "0.9"
+encoding_rs = "0.8"
+log         = "0.4"
+
+serde  = { version = "1", features = ["derive"], optional = true }
+rayon  = { version = "1", optional = true }
+
+[dev-dependencies]
+insta     = { version = "1", features = ["yaml"] }
+printpdf  = "0.7"
+env_logger = "0.11"
+
+[features]
+default  = []
+serde    = ["dep:serde", "compact_str/serde"]
+parallel = ["dep:rayon"]
+ocr      = []
+
+[lints.rust]
+missing_docs = "deny"
+unsafe_code  = "forbid"
+
+[lints.clippy]
+redundant_clone = "warn"
+large_enum_variant = "warn"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1

@@ -1,1 +1,6 @@
 /target
+
+# Claude Code tooling
+/.agents/
+/skills-lock.json
+/.claude/
