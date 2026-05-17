@@ -1,0 +1,21 @@
+---
+source: tests/extraction.rs
+assertion_line: 157
+expression: layout
+---
+ACME                                               Invoice
+
+
+
+
+
+
+Line A                                                     1.00
+
+
+Line B                                                     2.00
+
+
+
+
+Total                                                      3.00

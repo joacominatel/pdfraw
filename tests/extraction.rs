@@ -95,6 +95,69 @@ fn words_have_increasing_x_within_line() {
 }
 
 #[test]
+fn layout_preserves_invoice_columns() {
+    // Mock a tiny invoice: emitter on the left, total on the right of the
+    // same line, then items below.
+    let pdf = common::build_pdf(&[
+        (20.0, 270.0, "Acme Corp"),
+        (150.0, 270.0, "Invoice #001"),
+        (20.0, 230.0, "Item A"),
+        (170.0, 230.0, "$10.00"),
+        (20.0, 220.0, "Item B"),
+        (170.0, 220.0, "$20.00"),
+        (20.0, 200.0, "Total"),
+        (170.0, 200.0, "$30.00"),
+    ]);
+    let doc = Document::from_bytes(pdf).unwrap();
+    let page = doc.page(0).unwrap();
+    let layout = page
+        .extract_text_layout(&TextOptions::pdfplumber_defaults())
+        .unwrap();
+
+    // Right column words should follow their left column word on the same
+    // line with multiple spaces.
+    for (left, right) in [
+        ("Acme", "Invoice"),
+        ("Item A", "$10.00"),
+        ("Item B", "$20.00"),
+        ("Total", "$30.00"),
+    ] {
+        let line = layout
+            .lines()
+            .find(|l| l.contains(left) && l.contains(right))
+            .unwrap_or_else(|| panic!("missing line with {left:?} and {right:?} in {layout:?}"));
+        let l_idx = line.find(left).unwrap() + left.len();
+        let r_idx = line.find(right).unwrap();
+        let gap = r_idx - l_idx;
+        assert!(
+            gap >= 5,
+            "expected ≥5 spaces between {left:?} and {right:?}, got {gap}: {line:?}"
+        );
+    }
+}
+
+#[test]
+fn layout_snapshot_invoice() {
+    let pdf = common::build_pdf(&[
+        (20.0, 270.0, "ACME"),
+        (150.0, 270.0, "Invoice"),
+        (20.0, 240.0, "Line A"),
+        (170.0, 240.0, "1.00"),
+        (20.0, 225.0, "Line B"),
+        (170.0, 225.0, "2.00"),
+        (20.0, 200.0, "Total"),
+        (170.0, 200.0, "3.00"),
+    ]);
+    let doc = Document::from_bytes(pdf).unwrap();
+    let layout = doc
+        .page(0)
+        .unwrap()
+        .extract_text_layout(&TextOptions::pdfplumber_defaults())
+        .unwrap();
+    insta::assert_snapshot!(layout);
+}
+
+#[test]
 fn page_metrics_match_a4() {
     let pdf = common::build_pdf(&[(20.0, 270.0, "x")]);
     let doc = Document::from_bytes(pdf).unwrap();

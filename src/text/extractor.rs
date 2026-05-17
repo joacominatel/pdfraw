@@ -181,9 +181,91 @@ pub fn extract_text_simple(chars: &[Char]) -> String {
 
 /// Layout-preserving text replicating pdfplumber's algorithm.
 ///
-/// Stub for phase 4. Falls back to [`extract_text_simple`].
-pub fn extract_text_layout(chars: &[Char], _opts: &TextOptions) -> String {
-    extract_text_simple(chars)
+/// Reconstructs a monospaced virtual grid where the spatial relationship
+/// between glyphs is preserved through inserted spaces and newlines:
+/// - each output column is `x_density` points wide (default 7.25);
+/// - each output line is `y_density` points tall (default 13.0);
+/// - for every word, we insert enough leading spaces to align its `x0` to
+///   the nearest virtual column;
+/// - for every line, we insert enough leading newlines to align its `top`
+///   to the nearest virtual row.
+pub fn extract_text_layout(chars: &[Char], opts: &TextOptions) -> String {
+    if chars.is_empty() {
+        return String::new();
+    }
+
+    let word_opts = WordOptions {
+        x_tolerance: opts.x_tolerance,
+        y_tolerance: opts.y_tolerance,
+        x_tolerance_ratio: opts.x_tolerance_ratio,
+        keep_blank_chars: opts.keep_blank_chars,
+        use_text_flow: opts.use_text_flow,
+        expand_ligatures: opts.expand_ligatures,
+    };
+    let words = extract_words(chars, &word_opts);
+    if words.is_empty() {
+        return String::new();
+    }
+
+    // Bounding box origin: smallest x0 and smallest top across all chars
+    // (matches pdfplumber's default layout_bbox = page bbox of chars).
+    let x_origin = chars.iter().map(|c| c.x0).fold(f32::INFINITY, f32::min);
+    let y_origin = chars.iter().map(|c| c.top).fold(f32::INFINITY, f32::min);
+
+    // Group words back into lines using y_tolerance, preserving the
+    // top-to-bottom order produced by extract_words.
+    let mut lines: Vec<Vec<&Word>> = Vec::new();
+    for w in &words {
+        match lines.last_mut() {
+            Some(line) if same_line(line[0], w, opts.y_tolerance) => line.push(w),
+            _ => lines.push(vec![w]),
+        }
+    }
+    // Ensure top-ascending order across lines (extract_words already sorts
+    // by top, but defensive sort costs nothing).
+    lines.sort_by(|a, b| a[0].top.partial_cmp(&b[0].top).unwrap_or(Ordering::Equal));
+
+    let mut out = String::new();
+    let mut newlines_so_far: i32 = 0;
+
+    for (i, line) in lines.iter().enumerate() {
+        let y_dist = (line[0].top - y_origin) / opts.y_density;
+        let target_row = y_dist.round() as i32;
+        let mut needed_newlines = target_row - newlines_so_far;
+        if i > 0 {
+            needed_newlines = needed_newlines.max(1);
+        } else {
+            needed_newlines = needed_newlines.max(0);
+        }
+        for _ in 0..needed_newlines {
+            out.push('\n');
+        }
+        newlines_so_far += needed_newlines;
+
+        let mut col: i32 = 0;
+        for (j, w) in line.iter().enumerate() {
+            let x_dist = (w.x0 - x_origin) / opts.x_density;
+            let target_col = x_dist.round() as i32;
+            let mut needed_spaces = target_col - col;
+            if j > 0 {
+                needed_spaces = needed_spaces.max(1);
+            } else {
+                needed_spaces = needed_spaces.max(0);
+            }
+            for _ in 0..needed_spaces {
+                out.push(' ');
+            }
+            col += needed_spaces;
+
+            out.push_str(w.text.as_str());
+            col += w.text.chars().count() as i32;
+        }
+    }
+    out
+}
+
+fn same_line(a: &Word, b: &Word, y_tol: f32) -> bool {
+    (a.top - b.top).abs() <= y_tol
 }
 
 #[cfg(test)]
@@ -250,5 +332,42 @@ mod tests {
         ];
         let text = extract_text_simple(&chars);
         assert_eq!(text, "A\nB");
+    }
+
+    #[test]
+    fn layout_aligns_right_column_with_spaces() {
+        // Two words on the same line: "Total" at x=0, "$100" far right at x=290
+        // With default x_density=7.25, 290/7.25 ≈ 40 columns → ~35 spaces.
+        let mut chars = vec![];
+        for (i, ch) in "Total".chars().enumerate() {
+            let x = i as f32 * 6.0;
+            chars.push(mk(&ch.to_string(), x, x + 6.0, 10.0, 22.0));
+        }
+        for (i, ch) in "$100".chars().enumerate() {
+            let x = 290.0 + i as f32 * 6.0;
+            chars.push(mk(&ch.to_string(), x, x + 6.0, 10.0, 22.0));
+        }
+        let opts = TextOptions::pdfplumber_defaults();
+        let text = extract_text_layout(&chars, &opts);
+        assert!(text.starts_with("Total"));
+        assert!(text.contains("$100"));
+        // Number of spaces between "Total" and "$100" should be roughly
+        // (290 - 30) / 7.25 ≈ 35 → at least 30 spaces.
+        let gap_len = text["Total".len()..text.find("$100").unwrap()].len();
+        assert!(gap_len > 25, "gap was {gap_len} chars: {text:?}");
+    }
+
+    #[test]
+    fn layout_preserves_two_lines_with_vertical_gap() {
+        // Header at top=10, body at top=50 (40pt apart, ≈3 virtual rows).
+        let chars = vec![
+            mk("H", 0.0, 5.0, 10.0, 22.0),
+            mk("B", 0.0, 5.0, 50.0, 62.0),
+        ];
+        let opts = TextOptions::pdfplumber_defaults();
+        let text = extract_text_layout(&chars, &opts);
+        // (50 - 10) / 13 = 3.07 → 3 newlines.
+        assert!(text.matches('\n').count() >= 2, "got {text:?}");
+        assert!(text.contains('H') && text.contains('B'));
     }
 }
