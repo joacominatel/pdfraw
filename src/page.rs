@@ -103,21 +103,24 @@ impl<'doc> Page<'doc> {
     /// # Ok(()) }
     /// ```
     pub fn chars(&self) -> Result<&[Char]> {
-        if let Some(v) = self.chars_cache.get() {
-            return Ok(v.as_slice());
+        if let Some(cached) = self.chars_cache.get() {
+            return Ok(cached.as_slice());
         }
-        let v = crate::parser::lopdf_backend::extract_chars(self)?;
-        // `set` returns `Ok(())` on success and `Err(value)` if another
-        // caller raced ahead — either way `get()` is now `Some`, so no
-        // `expect` is needed.
-        match self.chars_cache.set(v) {
-            Ok(()) | Err(_) => {}
-        }
+        let parsed = crate::parser::lopdf_backend::extract_chars(self)?;
+        // `set` returns `Err(parsed)` only when another caller already
+        // populated the cell first. In that case our `parsed` is dropped
+        // and we read whatever the winner stored — both walks of the same
+        // content stream produce the same chars, so the result is
+        // observationally identical.
+        let _ = self.chars_cache.set(parsed);
+        // Invariant: after the get-or-set sequence above, the cell is
+        // always populated. `expect` here documents that post-condition
+        // rather than masking a runtime failure.
         Ok(self
             .chars_cache
             .get()
-            .map(Vec::as_slice)
-            .unwrap_or_default())
+            .expect("chars_cache populated by either set() above or a concurrent caller")
+            .as_slice())
     }
 
     /// Cluster the page's chars into words using `opts`.
