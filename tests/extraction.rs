@@ -158,6 +158,13 @@ fn layout_snapshot_invoice() {
 }
 
 #[test]
+fn text_page_is_not_reported_as_scanned() {
+    let pdf = common::build_pdf(&[(20.0, 270.0, "Real text")]);
+    let doc = Document::from_bytes(pdf).unwrap();
+    assert_eq!(doc.page(0).unwrap().is_scanned().unwrap(), false);
+}
+
+#[test]
 fn page_metrics_match_a4() {
     let pdf = common::build_pdf(&[(20.0, 270.0, "x")]);
     let doc = Document::from_bytes(pdf).unwrap();
