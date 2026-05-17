@@ -33,17 +33,19 @@
 //! - [`prelude`]: convenient re-exports.
 
 #![forbid(unsafe_code)]
-#![warn(missing_docs)]
+#![deny(missing_docs)]
 
 pub mod char;
 pub mod document;
 pub mod error;
 pub mod geom;
 pub mod page;
-pub mod parser;
 pub mod prelude;
 pub mod text;
 pub mod word;
+
+// Internal parsing layer — implementation detail, not part of the stable API.
+pub(crate) mod parser;
 
 pub use crate::char::Char;
 pub use crate::document::Document;
