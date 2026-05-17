@@ -31,6 +31,7 @@ tags: [index, map-of-content]
 - [[decisions/0005-error-type-design]] — `thiserror`, `#[non_exhaustive]`
 - [[decisions/0006-cow-in-word-extraction]] — borrow over clone on the hot path
 - [[decisions/0007-lazy-char-cache]] — per-page `OnceLock<Vec<Char>>`
+- [[decisions/0008-widened-scan-detection]] — widen the `is_scanned()` criterion
 
 ## 📘 Guides
 

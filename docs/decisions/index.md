@@ -17,6 +17,7 @@ they link to each other.
 | 0005 | [[decisions/0005-error-type-design\|`Error` enum design]] | Accepted |
 | 0006 | [[decisions/0006-cow-in-word-extraction\|`Cow<[Char]>` in `extract_words`]] | Accepted |
 | 0007 | [[decisions/0007-lazy-char-cache\|Lazy per-page cache with `OnceLock`]] | Accepted |
+| 0008 | [[decisions/0008-widened-scan-detection\|Widen `is_scanned()` heuristic]] | Accepted |
 
 ## What an ADR looks like
 

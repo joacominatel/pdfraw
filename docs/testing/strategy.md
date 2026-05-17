@@ -14,14 +14,14 @@ Four levels, each with its role:
    │  Integration tests       │   15 tests — black-box end-to-end
    └──────────────────────────┘
 ┌──────────────────────────────────┐
-│    Unit tests                    │   34 tests — internal modules
+│    Unit tests                    │   38 tests — internal modules
 └──────────────────────────────────┘
         ┌──────────────────┐
         │ Snapshot tests   │   1 (inside integration) — layout output
         └──────────────────┘
 ```
 
-**Total: 54 tests** running on every `cargo test`.
+**Total: 58 tests** running on every `cargo test`.
 
 ## Unit tests (`#[cfg(test)] mod tests` per module)
 
@@ -39,6 +39,7 @@ Locations:
 | `src/parser/fonts/glyph_names.rs` | 4 (lookup + uniXXXX) |
 | `src/parser/fonts/differences.rs` | 3 (override, increment, miss) |
 | `src/parser/fonts/widths.rs` | 2 (array form, range form) |
+| `src/parser/scan_detect.rs` | 4 (text, Do, empty, paths-only) |
 
 ## Integration tests (`tests/extraction.rs`)
 

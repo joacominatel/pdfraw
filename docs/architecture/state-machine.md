@@ -159,15 +159,18 @@ with trivial logic:
 for op in content.operations {
     match op.operator.as_str() {
         "BT" | "Tj" | "TJ" | "'" | "\"" => has_text = true,
-        "Do" => image_refs.push(name_operand),
+        "Do" | "BI" => has_image_like = true,
         _ => {}
     }
 }
 ```
 
-If there was no text **and** some `Do` resolves to an XObject
-`/Subtype /Image`, the page is probably scanned and the API returns
-`Ok(true)`.
+If there was no text **and** any image-bearing operator was emitted
+(`Do` to any XObject — `/Image` or `/Form` — or an inline image `BI`),
+the page is probably image-only and the API returns `Ok(true)`. The
+heuristic deliberately does not descend into the XObject dictionary to
+verify the subtype — see [[decisions/0008-widened-scan-detection]] for
+the rationale.
 
 ## Known edge cases
 
