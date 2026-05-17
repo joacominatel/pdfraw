@@ -33,17 +33,9 @@ pub fn extract_type0(doc: &LDoc, font_dict: &Dictionary) -> Option<HashMap<u32, 
         _ => return None,
     };
 
-    let default_width = cid_dict
-        .get(b"DW")
-        .ok()
-        .and_then(|o| match o {
-            Object::Integer(i) => Some(*i as f32),
-            Object::Real(r) => Some(*r),
-            _ => None,
-        })
-        .unwrap_or(1000.0)
-        / 1000.0;
-    let _ = default_width; // surfaced to caller separately if needed later
+    // /DW (default width) is not threaded out yet; the caller uses the
+    // crate-wide 0.5em fallback in `Widths::empty`. When we start needing
+    // per-font default widths, this is where to source them.
 
     let mut out = HashMap::new();
     let mut i = 0;
@@ -121,7 +113,7 @@ mod tests {
     }
 
     #[test]
-    fn array_form_indexed_widths() {
+    fn extract_type0_returns_indexed_widths_when_array_form() {
         let (doc, font) = build_font(vec![
             Object::Integer(10),
             Object::Array(vec![Object::Integer(500), Object::Integer(600)]),
@@ -132,7 +124,7 @@ mod tests {
     }
 
     #[test]
-    fn range_form_shared_width() {
+    fn extract_type0_returns_shared_width_when_range_form() {
         let (doc, font) = build_font(vec![
             Object::Integer(20),
             Object::Integer(22),
