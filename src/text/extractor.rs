@@ -284,7 +284,8 @@ mod tests {
 
     #[test]
     fn empty_chars_returns_no_words() {
-        let words = extract_words(&[], &WordOptions::default());
+        let chars: Vec<Char> = Vec::new();
+        let words = extract_words(&chars, &WordOptions::default());
         assert!(words.is_empty());
     }
 
