@@ -56,6 +56,45 @@ fn extract_chars_for_multiple_lines_yields_distinct_tops() {
 }
 
 #[test]
+fn extract_text_returns_visible_string() {
+    let pdf = common::build_pdf(&[(20.0, 270.0, "Hello world")]);
+    let doc = Document::from_bytes(pdf).unwrap();
+    let text = doc.page(0).unwrap().extract_text().unwrap();
+    assert!(
+        text.contains("Hello") && text.contains("world"),
+        "got {text:?}"
+    );
+}
+
+#[test]
+fn extract_text_separates_lines_with_newline() {
+    let pdf = common::build_pdf(&[
+        (20.0, 270.0, "Above"),
+        (20.0, 240.0, "Below"),
+    ]);
+    let doc = Document::from_bytes(pdf).unwrap();
+    let text = doc.page(0).unwrap().extract_text().unwrap();
+    let lines: Vec<&str> = text.lines().collect();
+    assert!(lines.len() >= 2, "expected ≥2 lines, got {text:?}");
+    assert!(text.contains("Above") && text.contains("Below"));
+}
+
+#[test]
+fn words_have_increasing_x_within_line() {
+    let pdf = common::build_pdf(&[(20.0, 270.0, "alpha beta gamma")]);
+    let doc = Document::from_bytes(pdf).unwrap();
+    let page = doc.page(0).unwrap();
+    let words = page.words(&WordOptions::default()).unwrap();
+    let mut last_x: f32 = f32::NEG_INFINITY;
+    for w in &words {
+        assert!(w.x0 >= last_x, "non-monotonic x: {:?}", w);
+        last_x = w.x0;
+    }
+    let texts: Vec<_> = words.iter().map(|w| w.text.as_str()).collect();
+    assert_eq!(texts, vec!["alpha", "beta", "gamma"]);
+}
+
+#[test]
 fn page_metrics_match_a4() {
     let pdf = common::build_pdf(&[(20.0, 270.0, "x")]);
     let doc = Document::from_bytes(pdf).unwrap();
