@@ -178,10 +178,8 @@ fn page_metrics_match_a4() {
 
 #[test]
 fn multi_page_document_iterates_in_order() {
-    let pdf = common::build_two_page_pdf(
-        &[(20.0, 270.0, "Page one")],
-        &[(20.0, 270.0, "Page two")],
-    );
+    let pdf =
+        common::build_two_page_pdf(&[(20.0, 270.0, "Page one")], &[(20.0, 270.0, "Page two")]);
     let doc = Document::from_bytes(pdf).unwrap();
     assert_eq!(doc.num_pages(), 2);
 
@@ -191,4 +189,43 @@ fn multi_page_document_iterates_in_order() {
         .collect();
     assert!(texts[0].contains("Page one"), "page 0 = {:?}", texts[0]);
     assert!(texts[1].contains("Page two"), "page 1 = {:?}", texts[1]);
+}
+
+#[test]
+fn document_page_returns_out_of_bounds_when_index_too_large() {
+    let pdf = common::build_pdf(&[(20.0, 270.0, "x")]);
+    let doc = Document::from_bytes(pdf).unwrap();
+    match doc.page(99) {
+        Err(Error::PageOutOfBounds(99)) => {}
+        other => panic!("expected PageOutOfBounds(99), got {:?}", other.err()),
+    }
+}
+
+#[test]
+fn document_open_reads_pdf_from_disk() {
+    let pdf = common::build_pdf(&[(20.0, 270.0, "from disk")]);
+    let path = std::env::temp_dir().join("pdf_extractor_open_test.pdf");
+    std::fs::write(&path, &pdf).unwrap();
+
+    let doc = Document::open(&path).unwrap();
+    let text = doc.page(0).unwrap().extract_text().unwrap();
+    assert!(text.contains("from disk"), "got {text:?}");
+
+    let _ = std::fs::remove_file(&path);
+}
+
+#[test]
+fn text_options_builder_returns_overrides_when_fields_set() {
+    let opts = TextOptions::builder()
+        .x_tolerance(1.5)
+        .y_tolerance(2.5)
+        .x_density(8.0)
+        .y_density(14.0)
+        .keep_blank_chars(true)
+        .build();
+    assert!((opts.x_tolerance - 1.5).abs() < f32::EPSILON);
+    assert!((opts.y_tolerance - 2.5).abs() < f32::EPSILON);
+    assert!((opts.x_density - 8.0).abs() < f32::EPSILON);
+    assert!((opts.y_density - 14.0).abs() < f32::EPSILON);
+    assert!(opts.keep_blank_chars);
 }

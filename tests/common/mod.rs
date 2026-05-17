@@ -20,7 +20,10 @@ pub fn build_pdf(lines: &[(f32, f32, &str)]) -> Vec<u8> {
 }
 
 /// Build a two-page PDF with separate lines per page.
-pub fn build_two_page_pdf(page1_lines: &[(f32, f32, &str)], page2_lines: &[(f32, f32, &str)]) -> Vec<u8> {
+pub fn build_two_page_pdf(
+    page1_lines: &[(f32, f32, &str)],
+    page2_lines: &[(f32, f32, &str)],
+) -> Vec<u8> {
     let (doc, p1, l1) = PdfDocument::new("two", Mm(210.0), Mm(297.0), "Layer 1");
     let font = doc.add_builtin_font(BuiltinFont::Helvetica).unwrap();
     let layer1 = doc.get_page(p1).get_layer(l1);
