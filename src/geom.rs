@@ -215,8 +215,8 @@ mod tests {
     }
 
     #[test]
-    fn matrix_composition_then_translate_then_scale() {
-        // first translate(1,2), then scale(2,3): point (1,1) -> (2,3) -> (4,9)
+    fn then_applies_self_first_then_other() {
+        // First translate(1,2), then scale(2,3): point (1,1) -> (2,3) -> (4,9)
         let m = Matrix::translation(1.0, 2.0).then(Matrix::scale(2.0, 3.0));
         assert_eq!(m.transform(Point::new(1.0, 1.0)), Point::new(4.0, 9.0));
     }
@@ -242,7 +242,7 @@ mod tests {
     }
 
     #[test]
-    fn x_scale_of_scale_matrix() {
+    fn x_scale_returns_horizontal_factor_when_matrix_is_pure_scale() {
         let m = Matrix::scale(3.0, 5.0);
         assert!((m.x_scale() - 3.0).abs() < 1e-5);
     }
