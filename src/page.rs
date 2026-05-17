@@ -53,13 +53,12 @@ impl<'doc> Page<'doc> {
 
     fn metrics(&self) -> &PageMetrics {
         self.metrics_cache.get_or_init(|| {
-            crate::parser::lopdf_backend::page_metrics(&self.doc.inner, self.page_id()).unwrap_or(
-                PageMetrics {
+            crate::parser::lopdf_backend::page_metrics(&self.doc.inner, self.page_id(), self.index)
+                .unwrap_or(PageMetrics {
                     width: 612.0,
                     height: 792.0,
                     rotation: 0,
-                },
-            )
+                })
         })
     }
 
@@ -78,18 +77,47 @@ impl<'doc> Page<'doc> {
         self.metrics().rotation
     }
 
-    /// Lazily parse and cache the page's chars.
+    /// Lazily parse and cache the page's positioned glyphs.
     ///
-    /// On parse failure the error is returned without being cached, so a
-    /// subsequent call will re-attempt extraction.
+    /// The first call walks the content stream; subsequent calls return the
+    /// cached slice in O(1).
+    ///
+    /// # Errors
+    ///
+    /// - [`Error::Pdf`](crate::Error::Pdf) if the page dictionary or content
+    ///   stream cannot be read.
+    /// - [`Error::ContentStream`](crate::Error::ContentStream) if the
+    ///   content stream is malformed.
+    ///
+    /// On error nothing is cached, so a retry will re-attempt the parse.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # use pdf_extractor::prelude::*;
+    /// # fn run() -> Result<()> {
+    /// let doc = Document::open("invoice.pdf")?;
+    /// for c in doc.page(0)?.chars()? {
+    ///     println!("{} at ({}, {})", c.text, c.x0, c.top);
+    /// }
+    /// # Ok(()) }
+    /// ```
     pub fn chars(&self) -> Result<&[Char]> {
         if let Some(v) = self.chars_cache.get() {
             return Ok(v.as_slice());
         }
         let v = crate::parser::lopdf_backend::extract_chars(self)?;
-        // Race: if another thread populated it first, our value is dropped.
-        let _ = self.chars_cache.set(v);
-        Ok(self.chars_cache.get().expect("just set").as_slice())
+        // `set` returns `Ok(())` on success and `Err(value)` if another
+        // caller raced ahead — either way `get()` is now `Some`, so no
+        // `expect` is needed.
+        match self.chars_cache.set(v) {
+            Ok(()) | Err(_) => {}
+        }
+        Ok(self
+            .chars_cache
+            .get()
+            .map(Vec::as_slice)
+            .unwrap_or_default())
     }
 
     /// Cluster the page's chars into words using `opts`.

@@ -14,14 +14,18 @@ use lopdf::{Dictionary, Document as LDoc, Encoding, Object, ObjectId};
 use std::collections::HashMap;
 
 /// Read width/height/rotation for the page.
-pub(crate) fn page_metrics(doc: &LDoc, page_id: ObjectId) -> Result<PageMetrics> {
-    let page = doc.get_dictionary(page_id).map_err(Error::from)?;
+pub(crate) fn page_metrics(
+    doc: &LDoc,
+    page_id: ObjectId,
+    page_index: usize,
+) -> Result<PageMetrics> {
+    let page = doc.get_dictionary(page_id)?;
     let media_box =
         resolve_inheritable(doc, page, b"MediaBox").ok_or_else(|| Error::ContentStream {
-            page: 0,
+            page: page_index,
             reason: "missing /MediaBox".into(),
         })?;
-    let (width, height) = media_box_dimensions(&media_box)?;
+    let (width, height) = media_box_dimensions(page_index, &media_box)?;
     let rotation = resolve_inheritable(doc, page, b"Rotate")
         .and_then(|o| match o {
             Object::Integer(i) => Some(i as i16),
@@ -35,24 +39,24 @@ pub(crate) fn page_metrics(doc: &LDoc, page_id: ObjectId) -> Result<PageMetrics>
     })
 }
 
+/// Walk the page-tree `/Parent` chain looking for an inheritable key.
+///
+/// PDF defines `MediaBox`, `Rotate`, `Resources`, and `CropBox` as
+/// inheritable from the closest ancestor `/Pages` node that defines them.
 fn resolve_inheritable(doc: &LDoc, page: &Dictionary, key: &[u8]) -> Option<Object> {
-    if let Ok(v) = page.get(key) {
-        return Some(deref(doc, v.clone()));
-    }
-    let mut cursor = page.clone();
-    while let Ok(parent) = cursor.get(b"Parent") {
-        if let Object::Reference(id) = parent {
-            if let Ok(d) = doc.get_dictionary(*id) {
-                if let Ok(v) = d.get(key) {
-                    return Some(deref(doc, v.clone()));
-                }
-                cursor = d.clone();
-                continue;
-            }
+    let mut cursor: &Dictionary = page;
+    loop {
+        if let Ok(v) = cursor.get(key) {
+            return Some(deref(doc, v.clone()));
         }
-        break;
+        let Ok(Object::Reference(id)) = cursor.get(b"Parent") else {
+            return None;
+        };
+        let Ok(parent) = doc.get_dictionary(*id) else {
+            return None;
+        };
+        cursor = parent;
     }
-    None
 }
 
 fn deref(doc: &LDoc, obj: Object) -> Object {
@@ -62,19 +66,19 @@ fn deref(doc: &LDoc, obj: Object) -> Object {
     }
 }
 
-fn media_box_dimensions(o: &Object) -> Result<(f32, f32)> {
+fn media_box_dimensions(page_index: usize, o: &Object) -> Result<(f32, f32)> {
     let arr = match o {
         Object::Array(a) => a,
         _ => {
             return Err(Error::ContentStream {
-                page: 0,
+                page: page_index,
                 reason: "/MediaBox is not an array".into(),
             });
         }
     };
     if arr.len() != 4 {
         return Err(Error::ContentStream {
-            page: 0,
+            page: page_index,
             reason: format!("/MediaBox has {} elements, expected 4", arr.len()),
         });
     }
@@ -83,7 +87,7 @@ fn media_box_dimensions(o: &Object) -> Result<(f32, f32)> {
             Object::Integer(i) => Ok(*i as f32),
             Object::Real(r) => Ok(*r),
             _ => Err(Error::ContentStream {
-                page: 0,
+                page: page_index,
                 reason: "/MediaBox contains a non-numeric value".into(),
             }),
         }
@@ -115,11 +119,9 @@ pub(crate) fn extract_chars(page: &Page<'_>) -> Result<Vec<Char>> {
     let mut fonts = FontTable::default();
     if let Ok(map) = doc.get_page_fonts(page_id) {
         for (name, dict) in map {
-            let info = FontInfo::from_dict(doc, dict);
-            fonts.insert(name, info);
+            fonts.insert(name, FontInfo::from_dict(doc, dict));
         }
     }
-    let fonts = fonts;
 
     let mut ts = TextState::default();
     let mut gs_stack: Vec<Matrix> = vec![Matrix::IDENTITY];
