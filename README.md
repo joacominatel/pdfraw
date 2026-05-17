@@ -28,6 +28,19 @@ The library exposes the underlying primitives too: positioned [`Char`]s,
 clustered [`Word`]s, page metadata, and detection of scanned (image-only)
 pages.
 
+## Documentation
+
+There's a full Obsidian-compatible vault in [`docs/`](docs/README.md) with
+architecture, decisions (ADRs), guides, reference, and roadmap. Open the
+folder as an Obsidian vault to navigate wikilinks; or just read it as
+plain Markdown.
+
+Quick links:
+- [docs/guides/quick-start.md](docs/guides/quick-start.md)
+- [docs/architecture/overview.md](docs/architecture/overview.md)
+- [docs/decisions/index.md](docs/decisions/index.md)
+- [docs/reference/api.md](docs/reference/api.md)
+
 ## Status
 
 MVP. Implements:
