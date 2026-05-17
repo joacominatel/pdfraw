@@ -358,10 +358,39 @@ struct FontInfo<'doc> {
     encoding: Option<Encoding<'doc>>,
     widths: Widths,
     is_composite: bool,
+    /// `/Encoding /Differences` overrides for byte-code → Unicode.
+    differences: Option<crate::parser::fonts::differences::Differences>,
 }
 
 impl FontInfo<'_> {
+    /// Decode one glyph code into the Unicode string it produces. Returns
+    /// `(text, advance_bytes)` so callers can iterate variable-length codes
+    /// in composite fonts.
     fn decode(&self, bytes: &[u8]) -> String {
+        // If we have a per-code override from /Differences, build the
+        // decoded string ourselves so we can substitute on byte basis. We
+        // only do this for simple fonts (1 byte per code).
+        if let Some(diffs) = &self.differences {
+            if !self.is_composite {
+                let mut s = String::with_capacity(bytes.len());
+                let base_decoded = match &self.encoding {
+                    Some(enc) => enc.bytes_to_string(bytes).ok(),
+                    None => None,
+                };
+                let base_chars: Option<Vec<char>> =
+                    base_decoded.as_ref().map(|d| d.chars().collect());
+                for (i, b) in bytes.iter().enumerate() {
+                    if let Some(c) = diffs.get(b) {
+                        s.push(*c);
+                    } else if let Some(bc) = base_chars.as_ref().and_then(|v| v.get(i)) {
+                        s.push(*bc);
+                    } else {
+                        s.push(*b as char);
+                    }
+                }
+                return s;
+            }
+        }
         match &self.encoding {
             Some(enc) => enc.bytes_to_string(bytes).unwrap_or_else(|_| latin1(bytes)),
             None => latin1(bytes),
@@ -398,11 +427,15 @@ impl<'doc> FontInfo<'doc> {
             dict.get(b"Subtype").and_then(Object::as_name).ok(),
             Some(b"Type0")
         );
-        // For simple fonts, widths come from /Widths + /FirstChar. For
-        // composite (CID) fonts the widths come from the DescendantFont's
-        // /W array — phase 5.
-        let widths = simple_widths(dict).unwrap_or_else(Widths::empty);
-        Self { encoding, widths, is_composite }
+        let widths = if is_composite {
+            crate::parser::fonts::widths::extract_type0(doc, dict)
+                .map(|by_code| Widths { by_code, default_width: 0.5 })
+                .unwrap_or_else(Widths::empty)
+        } else {
+            simple_widths(dict).unwrap_or_else(Widths::empty)
+        };
+        let differences = crate::parser::fonts::differences::extract(doc, dict);
+        Self { encoding, widths, is_composite, differences }
     }
 }
 

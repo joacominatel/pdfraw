@@ -358,6 +358,15 @@ mod tests {
     }
 
     #[test]
+    fn expand_ligatures_option_replaces_fi_with_two_chars() {
+        let chars = vec![mk("\u{FB01}", 0.0, 5.0, 10.0, 22.0)];
+        let opts = WordOptions { expand_ligatures: true, ..WordOptions::default() };
+        let words = extract_words(&chars, &opts);
+        assert_eq!(words.len(), 1);
+        assert_eq!(words[0].text.as_str(), "fi");
+    }
+
+    #[test]
     fn layout_preserves_two_lines_with_vertical_gap() {
         // Header at top=10, body at top=50 (40pt apart, ≈3 virtual rows).
         let chars = vec![
