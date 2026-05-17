@@ -9,38 +9,56 @@ use crate::text::ligatures::expand;
 use crate::text::options::TextOptions;
 use crate::word::{Word, WordOptions};
 use compact_str::CompactString;
+use std::borrow::Cow;
 use std::cmp::Ordering;
 
 /// Cluster a slice of chars into words.
 ///
-/// Replicates pdfplumber's [`WordExtractor`]:
-/// 1. Sort chars by `(top, x0)` (unless `use_text_flow=true`).
+/// Replicates pdfplumber's `WordExtractor`:
+/// 1. Sort chars by `(top, x0)` (unless `opts.use_text_flow == true`).
 /// 2. Cluster by `top` with `y_tolerance` → lines.
 /// 3. Within each line, walk left-to-right and start a new word when the
 ///    horizontal gap exceeds `x_tolerance`, when there's a backward x move,
-///    or when the line top differs.
+///    or when the line `top` differs.
+///
+/// When `opts.expand_ligatures == false` the input slice is borrowed and no
+/// allocation happens beyond the output `Vec<Word>`.
+///
+/// # Examples
+///
+/// ```
+/// # use pdf_extractor::{Char, WordOptions};
+/// # use pdf_extractor::text::extractor::extract_words;
+/// # use compact_str::CompactString;
+/// let chars = vec![
+///     Char { text: CompactString::from("H"), x0: 0.0, x1: 5.0, top: 0.0,
+///            bottom: 10.0, doctop: 0.0, size: 10.0,
+///            fontname: CompactString::from("F1"), upright: true },
+///     Char { text: CompactString::from("i"), x0: 5.0, x1: 8.0, top: 0.0,
+///            bottom: 10.0, doctop: 0.0, size: 10.0,
+///            fontname: CompactString::from("F1"), upright: true },
+/// ];
+/// let words = extract_words(&chars, &WordOptions::default());
+/// assert_eq!(words[0].text.as_str(), "Hi");
+/// ```
 pub fn extract_words(chars: &[Char], opts: &WordOptions) -> Vec<Word> {
     if chars.is_empty() {
         return Vec::new();
     }
 
-    // Optionally expand ligatures before clustering. We work on a borrowed
-    // view so the public `Char` slice is untouched.
-    let working: Vec<Char> = if opts.expand_ligatures {
-        chars.iter().map(expand_char).collect()
+    // Borrow the input unless ligature expansion forces us to allocate.
+    let working: Cow<'_, [Char]> = if opts.expand_ligatures {
+        Cow::Owned(chars.iter().map(expand_char).collect())
     } else {
-        chars.to_vec()
+        Cow::Borrowed(chars)
     };
 
-    // Sort indices for stable positioning.
     let mut indices: Vec<usize> = (0..working.len()).collect();
     if !opts.use_text_flow {
         indices.sort_by(|&a, &b| compare_chars(&working[a], &working[b]));
     }
 
     let ordered: Vec<&Char> = indices.iter().map(|&i| &working[i]).collect();
-
-    // Cluster into lines by top.
     let lines = cluster_objects(&ordered, |c| c.top, opts.y_tolerance);
 
     let mut out = Vec::new();
@@ -52,16 +70,14 @@ pub fn extract_words(chars: &[Char], opts: &WordOptions) -> Vec<Word> {
         for c in line {
             if let Some(prev) = current.last() {
                 if char_begins_new_word(prev, c, opts) {
-                    if let Some(w) = build_word(&current, chars, &working, opts.expand_ligatures) {
+                    if let Some(w) = build_word(&current, &working) {
                         out.push(w);
                     }
                     current.clear();
                 }
             }
-            // Skip blank chars unless keep_blank_chars is set.
             if !opts.keep_blank_chars && c.text.chars().all(char::is_whitespace) {
-                // Whitespace acts as a word boundary too.
-                if let Some(w) = build_word(&current, chars, &working, opts.expand_ligatures) {
+                if let Some(w) = build_word(&current, &working) {
                     out.push(w);
                 }
                 current.clear();
@@ -69,7 +85,7 @@ pub fn extract_words(chars: &[Char], opts: &WordOptions) -> Vec<Word> {
             }
             current.push(c);
         }
-        if let Some(w) = build_word(&current, chars, &working, opts.expand_ligatures) {
+        if let Some(w) = build_word(&current, &working) {
             out.push(w);
         }
     }
@@ -92,19 +108,10 @@ fn char_begins_new_word(prev: &Char, curr: &Char, opts: &WordOptions) -> bool {
     curr.x0 > prev.x1 + x_tol
 }
 
-fn build_word(
-    chars: &[&Char],
-    original: &[Char],
-    working: &[Char],
-    expanded: bool,
-) -> Option<Word> {
-    if chars.is_empty() {
-        return None;
-    }
-    let mut text = String::new();
-    for c in chars {
-        text.push_str(c.text.as_str());
-    }
+fn build_word(chars: &[&Char], working: &[Char]) -> Option<Word> {
+    let first = *chars.first()?;
+    let last = *chars.last()?;
+    let text: String = chars.iter().map(|c| c.text.as_str()).collect();
     let x0 = chars.iter().map(|c| c.x0).fold(f32::INFINITY, f32::min);
     let x1 = chars.iter().map(|c| c.x1).fold(f32::NEG_INFINITY, f32::max);
     let top = chars.iter().map(|c| c.top).fold(f32::INFINITY, f32::min);
@@ -113,7 +120,7 @@ fn build_word(
         .map(|c| c.bottom)
         .fold(f32::NEG_INFINITY, f32::max);
 
-    let char_range = char_range_for(chars, original, working, expanded);
+    let char_range = char_range_for(first, last, working);
 
     Some(Word {
         text: CompactString::from(text.as_str()),
@@ -125,27 +132,21 @@ fn build_word(
     })
 }
 
-fn char_range_for(
-    word_chars: &[&Char],
-    original: &[Char],
-    working: &[Char],
-    expanded: bool,
-) -> std::ops::Range<usize> {
-    // When we work on the un-expanded slice, indices into `working` line up
-    // 1:1 with `original`. With ligature expansion, indices are over the
-    // expanded slice — we approximate by mapping the first/last char in the
-    // working slice that produced the same coordinates as the word
-    // endpoints. For the MVP this is good enough to round-trip simple PDFs.
-    let _ = (original, expanded);
-    let first = working
+/// Map a word's first/last char references back to their indices in the
+/// `working` slice the parser produced.
+///
+/// When the working slice equals the input slice (no ligature expansion)
+/// these indices match the public `chars()` output 1:1.
+fn char_range_for(first: &Char, last: &Char, working: &[Char]) -> std::ops::Range<usize> {
+    let first_idx = working
         .iter()
-        .position(|c| std::ptr::eq(c, word_chars[0] as *const Char))
+        .position(|c| std::ptr::eq(c, first))
         .unwrap_or(0);
-    let last = working
+    let last_idx = working
         .iter()
-        .rposition(|c| std::ptr::eq(c, word_chars[word_chars.len() - 1] as *const Char))
-        .unwrap_or(first);
-    first..(last + 1)
+        .rposition(|c| std::ptr::eq(c, last))
+        .unwrap_or(first_idx);
+    first_idx..(last_idx + 1)
 }
 
 fn expand_char(c: &Char) -> Char {
@@ -237,30 +238,18 @@ pub fn extract_text_layout(chars: &[Char], opts: &TextOptions) -> String {
     for (i, line) in lines.iter().enumerate() {
         let y_dist = (line[0].top - y_origin) / opts.y_density;
         let target_row = y_dist.round() as i32;
-        let mut needed_newlines = target_row - newlines_so_far;
-        if i > 0 {
-            needed_newlines = needed_newlines.max(1);
-        } else {
-            needed_newlines = needed_newlines.max(0);
-        }
-        for _ in 0..needed_newlines {
-            out.push('\n');
-        }
+        let minimum = if i > 0 { 1 } else { 0 };
+        let needed_newlines = (target_row - newlines_so_far).max(minimum);
+        out.extend(std::iter::repeat_n('\n', needed_newlines as usize));
         newlines_so_far += needed_newlines;
 
         let mut col: i32 = 0;
         for (j, w) in line.iter().enumerate() {
             let x_dist = (w.x0 - x_origin) / opts.x_density;
             let target_col = x_dist.round() as i32;
-            let mut needed_spaces = target_col - col;
-            if j > 0 {
-                needed_spaces = needed_spaces.max(1);
-            } else {
-                needed_spaces = needed_spaces.max(0);
-            }
-            for _ in 0..needed_spaces {
-                out.push(' ');
-            }
+            let minimum = if j > 0 { 1 } else { 0 };
+            let needed_spaces = (target_col - col).max(minimum);
+            out.extend(std::iter::repeat_n(' ', needed_spaces as usize));
             col += needed_spaces;
 
             out.push_str(w.text.as_str());
