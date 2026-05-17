@@ -94,7 +94,7 @@ impl<'doc> Page<'doc> {
     /// # Examples
     ///
     /// ```no_run
-    /// # use pdf_extractor::prelude::*;
+    /// # use pdfraw::prelude::*;
     /// # fn run() -> Result<()> {
     /// let doc = Document::open("invoice.pdf")?;
     /// for c in doc.page(0)?.chars()? {

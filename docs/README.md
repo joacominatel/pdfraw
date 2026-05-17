@@ -1,10 +1,10 @@
 ---
-tags: [vault-root, pdf-extractor]
+tags: [vault-root, pdfraw]
 ---
 
-# pdf_extractor — Vault
+# pdfraw — Vault
 
-Living documentation for the `pdf_extractor` crate. Designed to be opened
+Living documentation for the `pdfraw` crate. Designed to be opened
 as an **Obsidian Vault**: every Markdown file lives in its semantic
 folder and links to the rest via `[[wikilinks]]`.
 
@@ -85,5 +85,5 @@ docs/
 ## Links outside the vault
 
 - Source: `../src/`
-- Local rustdoc: `cargo doc --open --no-deps -p pdf_extractor`
+- Local rustdoc: `cargo doc --open --no-deps -p pdfraw`
 - Original implementation plan: `~/.claude/plans/el-objetivo-de-este-replicated-canyon.md`

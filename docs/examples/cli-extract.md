@@ -15,7 +15,7 @@ of a PDF. The source lives at `examples/extract.rs`.
 //! Usage:
 //!     cargo run --example extract -- path/to/invoice.pdf
 
-use pdf_extractor::prelude::*;
+use pdfraw::prelude::*;
 
 fn main() -> Result<()> {
     let path = std::env::args().nth(1).expect("usage: extract <path.pdf>");

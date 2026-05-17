@@ -5,20 +5,20 @@ tags: [reference, api]
 # Reference: public API
 
 Browsable summary of the crate's public surface. For the full doc,
-`cargo doc --open --no-deps -p pdf_extractor`.
+`cargo doc --open --no-deps -p pdfraw`.
 
 ## Public modules
 
 | Module | Re-exported in `prelude` | Purpose |
 |--------|---------------------------|-----------|
-| `pdf_extractor::document` | `Document` | Opening PDFs |
-| `pdf_extractor::page` | `Page` | View of a single page |
-| `pdf_extractor::char` | `Char` | Positioned glyph |
-| `pdf_extractor::word` | `Word`, `WordOptions` | Char cluster |
-| `pdf_extractor::text` | `TextOptions` | Extractor knobs |
-| `pdf_extractor::error` | `Error`, `Result` | Error types |
-| `pdf_extractor::geom` | — | `Matrix`, `BBox`, `Point` |
-| `pdf_extractor::parser` | — | **`pub(crate)`**, not part of the API |
+| `pdfraw::document` | `Document` | Opening PDFs |
+| `pdfraw::page` | `Page` | View of a single page |
+| `pdfraw::char` | `Char` | Positioned glyph |
+| `pdfraw::word` | `Word`, `WordOptions` | Char cluster |
+| `pdfraw::text` | `TextOptions` | Extractor knobs |
+| `pdfraw::error` | `Error`, `Result` | Error types |
+| `pdfraw::geom` | — | `Matrix`, `BBox`, `Point` |
+| `pdfraw::parser` | — | **`pub(crate)`**, not part of the API |
 
 ## `Document`
 
@@ -204,7 +204,7 @@ pub use crate::word::{Word, WordOptions};
 Typical use:
 
 ```rust
-use pdf_extractor::prelude::*;
+use pdfraw::prelude::*;
 ```
 
 ## Stability

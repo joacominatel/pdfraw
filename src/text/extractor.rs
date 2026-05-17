@@ -27,8 +27,8 @@ use std::cmp::Ordering;
 /// # Examples
 ///
 /// ```
-/// # use pdf_extractor::{Char, WordOptions};
-/// # use pdf_extractor::text::extractor::extract_words;
+/// # use pdfraw::{Char, WordOptions};
+/// # use pdfraw::text::extractor::extract_words;
 /// # use compact_str::CompactString;
 /// let chars = vec![
 ///     Char { text: CompactString::from("H"), x0: 0.0, x1: 5.0, top: 0.0,

@@ -693,7 +693,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "pdf_extractor"
+name = "pdfraw"
 version = "0.1.0"
 dependencies = [
  "compact_str",

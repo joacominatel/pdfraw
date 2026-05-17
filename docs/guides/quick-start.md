@@ -13,13 +13,15 @@ In your `Cargo.toml`:
 
 ```toml
 [dependencies]
-pdf_extractor = { path = "../pdf_extractor" }   # until published on crates.io
+pdfraw = { git = "https://github.com/joacominatel/pdfraw" }
 ```
+
+The crate is not on crates.io yet.
 
 ## First example
 
 ```rust
-use pdf_extractor::prelude::*;
+use pdfraw::prelude::*;
 
 fn main() -> Result<()> {
     let doc = Document::open("invoice.pdf")?;
@@ -47,7 +49,7 @@ virtual column — that is part of the output, not a display artifact.
 ## Iterate every page
 
 ```rust
-use pdf_extractor::prelude::*;
+use pdfraw::prelude::*;
 
 fn main() -> Result<()> {
     let doc = Document::open("contract.pdf")?;

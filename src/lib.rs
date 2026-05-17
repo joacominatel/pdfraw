@@ -1,4 +1,4 @@
-//! # pdf_extractor
+//! # pdfraw
 //!
 //! Layout-preserving PDF text extraction in pure Rust, inspired by
 //! [pdfplumber](https://github.com/jsvine/pdfplumber).
@@ -10,7 +10,7 @@
 //! ## Quick start
 //!
 //! ```no_run
-//! use pdf_extractor::prelude::*;
+//! use pdfraw::prelude::*;
 //!
 //! # fn main() -> Result<()> {
 //! let doc = Document::open("invoice.pdf")?;

@@ -1,15 +1,25 @@
 [package]
-name = "pdf_extractor"
+name = "pdfraw"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.85"
-license = "MIT OR Apache-2.0"
+license = "MIT"
 description = "Layout-preserving PDF text extraction in pure Rust (pdfplumber-inspired)"
+repository = "https://github.com/joacominatel/pdfraw"
+homepage = "https://github.com/joacominatel/pdfraw"
+documentation = "https://docs.rs/pdfraw"
+readme = "README.md"
 keywords = ["pdf", "extraction", "text", "layout", "invoice"]
 categories = ["text-processing", "parsing"]
+exclude = [
+    "docs/.obsidian/*",
+    ".agents/",
+    ".claude/",
+    "skills-lock.json",
+]
 
 [lib]
-name = "pdf_extractor"
+name = "pdfraw"
 path = "src/lib.rs"
 
 [dependencies]

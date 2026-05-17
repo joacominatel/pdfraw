@@ -26,10 +26,10 @@ impl Document {
     /// # Examples
     ///
     /// ```no_run
-    /// # use pdf_extractor::Document;
+    /// # use pdfraw::Document;
     /// let doc = Document::open("invoice.pdf")?;
     /// println!("{} page(s)", doc.num_pages());
-    /// # Ok::<_, pdf_extractor::Error>(())
+    /// # Ok::<_, pdfraw::Error>(())
     /// ```
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
         let inner = lopdf::Document::load(path)?;
@@ -45,7 +45,7 @@ impl Document {
     /// # Examples
     ///
     /// ```no_run
-    /// # use pdf_extractor::Document;
+    /// # use pdfraw::Document;
     /// let bytes: Vec<u8> = std::fs::read("invoice.pdf")?;
     /// let doc = Document::from_bytes(&bytes)?;
     /// # Ok::<_, Box<dyn std::error::Error>>(())

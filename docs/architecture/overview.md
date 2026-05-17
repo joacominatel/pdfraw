@@ -4,7 +4,7 @@ tags: [architecture, overview]
 
 # Architecture: the big picture
 
-`pdf_extractor` is a **pure-Rust library** that turns a PDF into text
+`pdfraw` is a **pure-Rust library** that turns a PDF into text
 while preserving the original layout. The architecture is organized into
 **4 sequential stages**, each with a clear responsibility that can be
 tested in isolation.

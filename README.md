@@ -1,17 +1,75 @@
-# pdf_extractor
+# pdfraw
 
-Pure-Rust, layout-preserving PDF text extraction — a port of
-[pdfplumber](https://github.com/jsvine/pdfplumber)'s `extract_text(layout=True)`
-algorithm. Built for invoices, credit notes, statements, and other
-documents where column alignment matters.
+A Rust library that pulls raw, layout-preserving text out of PDFs.
+It's a port of [pdfplumber](https://github.com/jsvine/pdfplumber)'s
+`extract_text(layout=True)` algorithm — same defaults, same output
+shape, but written from scratch on top of [`lopdf`](https://crates.io/crates/lopdf)
+in pure Rust. No FFI, no dylibs, no Python.
 
-[![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#license)
+The use case it was built for is invoices and credit notes: documents
+where the relationship between a line item and its right-aligned price
+is the whole point. If you need that text to come out the other side
+with the spatial relationships intact, this crate does that.
 
-## What it does
+## Status
 
-Given a PDF, it returns text that preserves the original 2D layout:
-left/right alignment, vertical spacing between sections, and the right-
-aligned numbers typical of invoices.
+v0.1. The crate works and has 58 tests covering the parser, the layout
+algorithm, font decoding, and end-to-end extraction on synthetic PDFs.
+On a corpus of 40 real invoices (~1.5 MB total) it pulls 99% of the
+content pdfplumber finds, about 21 times faster. I would not call the
+API frozen yet — expect breaking changes between 0.1.x releases until
+0.2 lands.
+
+## When to use it
+
+- You need to extract text from invoices, receipts, statements, or
+  similar documents where columns and right-alignment matter.
+- You want to ship a single self-contained binary — no Python runtime,
+  no shared libraries.
+- You care about throughput. A typical invoice page takes under a
+  millisecond.
+
+## When not to use it
+
+- The PDFs you process are scanned images. `pdfraw` tells you when a
+  page is scanned but does not OCR it. Pair it with Tesseract or a
+  cloud OCR service for those.
+- You need rich table extraction with cell detection. That is planned
+  for v0.2 but is not in this release.
+- You need to handle password-encrypted PDFs. `Document::open` returns
+  an error on those for now.
+- You need to read forms, annotations, or signatures. Different scope.
+
+## Install
+
+```toml
+[dependencies]
+pdfraw = { git = "https://github.com/joacominatel/pdfraw" }
+```
+
+The crate is not on crates.io yet.
+
+## A small example
+
+```rust
+use pdfraw::prelude::*;
+
+fn main() -> Result<()> {
+    let doc = Document::open("invoice.pdf")?;
+    for page in doc.pages() {
+        let page = page?;
+        if page.is_scanned()? {
+            eprintln!("page {} is scanned — needs OCR", page.index());
+            continue;
+        }
+        let text = page.extract_text_layout(&TextOptions::pdfplumber_defaults())?;
+        println!("--- page {} ---\n{text}", page.index());
+    }
+    Ok(())
+}
+```
+
+The output preserves the original 2D layout:
 
 ```
 ACME                                               Invoice
@@ -24,126 +82,114 @@ Line B                                                     2.00
 Total                                                      3.00
 ```
 
-The library exposes the underlying primitives too: positioned [`Char`]s,
-clustered [`Word`]s, page metadata, and detection of scanned (image-only)
-pages.
+If you need lower-level access, `page.chars()` gives you every glyph
+with its position, font, and size; `page.words(opts)` clusters those
+glyphs into words; and `Char`/`Word`/`BBox` are public so you can do
+your own layout analysis.
 
-## Documentation
+## Tuning
 
-There's a full Obsidian-compatible vault in [`docs/`](docs/README.md) with
-architecture, decisions (ADRs), guides, reference, and roadmap. Open the
-folder as an Obsidian vault to navigate wikilinks; or just read it as
-plain Markdown.
-
-Quick links:
-- [docs/guides/quick-start.md](docs/guides/quick-start.md)
-- [docs/architecture/overview.md](docs/architecture/overview.md)
-- [docs/decisions/index.md](docs/decisions/index.md)
-- [docs/reference/api.md](docs/reference/api.md)
-
-## Status
-
-MVP. Implements:
-
-- Pure-Rust PDF parsing on top of [`lopdf`](https://crates.io/crates/lopdf).
-- Content-stream state machine: `BT`/`ET`, `Tj`/`TJ`/`'`/`"`, full text
-  matrix and graphics-state stack, char/word spacing, horizontal scaling.
-- Font decoding: WinAnsi / MacRoman / Standard / Identity-H + ToUnicode,
-  plus `/Encoding /Differences` overrides and Type0 (CID) widths.
-- Char → Word → Line clustering, configurable tolerances.
-- pdfplumber-faithful layout reconstruction (`x_density = 7.25`,
-  `y_density = 13.0`).
-- Heuristic detection of image-only (scanned) pages.
-
-Out of scope for now: OCR, table extraction, encryption, vertical/rotated
-text in the layout output.
-
-## Quick start
+The defaults match pdfplumber's. If they don't fit your PDFs, the
+builder lets you adjust them:
 
 ```rust
-use pdf_extractor::prelude::*;
-
-# fn main() -> Result<()> {
-let doc = Document::open("invoice.pdf")?;
-for page in doc.pages() {
-    let page = page?;
-    if page.is_scanned()? {
-        eprintln!("page {} is scanned — needs OCR", page.index());
-        continue;
-    }
-    let text = page.extract_text_layout(&TextOptions::pdfplumber_defaults())?;
-    println!("--- page {} ---\n{text}", page.index());
-}
-# Ok(()) }
-```
-
-Or get the raw positioned glyphs:
-
-```rust
-use pdf_extractor::prelude::*;
-# fn run(doc: &Document) -> Result<()> {
-let page = doc.page(0)?;
-for c in page.chars()? {
-    println!("{} at ({}, {}) size={}", c.text, c.x0, c.top, c.size);
-}
-# Ok(()) }
-```
-
-## Tuning the layout
-
-`TextOptions::builder()` lets you override pdfplumber's defaults:
-
-```rust
-use pdf_extractor::TextOptions;
 let opts = TextOptions::builder()
-    .x_tolerance(1.5)         // tighter word grouping
-    .y_density(11.0)          // denser line spacing in output
-    .expand_ligatures(true)   // ﬁ → fi
+    .x_tolerance(1.5)        // tighter word grouping
+    .y_density(11.0)         // denser vertical spacing in output
+    .expand_ligatures(true)  // turn ﬁ into fi
     .build();
 ```
 
-| Option              | Default | Purpose                                          |
-|---------------------|---------|--------------------------------------------------|
-| `x_tolerance`       | 3.0 pt  | Max gap between glyphs of the same word          |
-| `y_tolerance`       | 3.0 pt  | Max vertical diff for glyphs on the same line    |
-| `x_tolerance_ratio` | None    | If set, `x_tol = ratio * font_size` (dynamic)    |
-| `x_density`         | 7.25 pt | Virtual column width in the output grid          |
-| `y_density`         | 13.0 pt | Virtual line height in the output grid           |
-| `keep_blank_chars`  | false   | Keep literal spaces from the PDF stream          |
-| `use_text_flow`     | false   | Preserve stream order instead of sorting         |
-| `expand_ligatures`  | false   | Replace `ﬁ`/`ﬂ`/`ﬃ`/… with their letter forms    |
+The full set of options and a "raise this when / lower this when"
+cheatsheet lives in [`docs/guides/tuning-text-options.md`](docs/guides/tuning-text-options.md).
 
-## Architecture
+## Numbers
 
-```
-src/
-  document.rs          Document::open, from_bytes, pages()
-  page.rs              Page<'doc>, extract_text*, is_scanned, chars(), words()
-  char.rs / word.rs    Positioned types
-  text/
-    options.rs         TextOptions + builder
-    cluster.rs         Greedy 1D clustering
-    extractor.rs       Word extraction + layout reconstruction
-    ligatures.rs       FB00–FB06 expansion
-    textmap.rs         Output-to-source char map
-  parser/
-    lopdf_backend.rs   Content-stream state machine
-    fonts/
-      glyph_names.rs   Adobe glyph name → Unicode
-      differences.rs   /Encoding /Differences parser
-      widths.rs        Type0 /W array parser
-    scan_detect.rs     Image-only page heuristic
-```
+Benchmarked against pdfplumber 0.11 on a corpus of 40 real invoice PDFs
+(78 pages, 191 KB of extracted text, total 1.4 MB on disk):
 
-## Testing
+|                       | pdfraw     | pdfplumber | ratio |
+|-----------------------|------------|------------|-------|
+| Total wall time       | 122 ms     | 2.6 s      | 21x   |
+| Median per-PDF        | 1.9 ms     | 30 ms      | 16x   |
+| p95 per-PDF           | 6.4 ms     | n/a        |       |
+| Throughput            | 1080 pg/s  | n/a        |       |
+| Content recall        | 99%        | 100%       |       |
+| PDFs below 95% recall | 0 of 40    | n/a        |       |
+
+The 1% gap is mostly whitespace and ordering noise — pdfraw is a bit
+more compact in how it pads columns. None of it is missing content.
+
+To reproduce on your own corpus:
 
 ```sh
-cargo test                  # unit + integration + doc tests
-cargo insta review          # update layout snapshots
-cargo clippy --all-targets  # zero warnings on a clean tree
+cargo run --release --example bench_dir -- /path/to/your/pdfs
 ```
+
+See [`docs/testing/strategy.md`](docs/testing/strategy.md) for the
+testing layout and [`docs/decisions/`](docs/decisions/) for the design
+rationale.
+
+## What's in the box
+
+The public API surface is small:
+
+- `Document::open(path)` / `Document::from_bytes(bytes)` — parse a PDF.
+- `Document::pages()` / `Document::page(i)` — iterate pages.
+- `Page::extract_text_layout(opts)` — the pdfplumber-style layout text.
+- `Page::extract_text()` — plain words joined with spaces, lines with
+  newlines. Faster, no layout.
+- `Page::chars()` / `Page::words(opts)` — the underlying positioned
+  primitives.
+- `Page::is_scanned()` — heuristic that returns true when a page emits
+  no text operators but draws images.
+- `TextOptions` / `WordOptions` — the knobs.
+- `Error` — a `#[non_exhaustive]` enum with `thiserror` derives; one
+  variant per failure mode.
+
+A short reference is at [`docs/reference/api.md`](docs/reference/api.md);
+full rustdoc is `cargo doc --open --no-deps -p pdfraw`.
+
+## What it gets right and what it gives up
+
+It implements:
+
+- Pure-Rust PDF parsing via `lopdf`.
+- A content-stream state machine that handles `BT`/`ET`, `Tj`/`TJ`/`'`/`"`,
+  the full text matrix, the graphics-state stack, char and word
+  spacing, horizontal scaling, leading, rise.
+- Font decoding for WinAnsi, MacRoman, StandardEncoding, MacExpert,
+  PDFDocEncoding, Identity-H/V with `/ToUnicode` CMaps, custom
+  `/Encoding /Differences` overrides, and Type0 (CID) widths.
+- Char → Word → Line clustering with the same tolerance model as
+  pdfplumber.
+- Layout reconstruction over a virtual monospaced grid (defaults
+  `x_density = 7.25 pt`, `y_density = 13.0 pt`).
+- A heuristic that flags scanned/image-only pages so callers can route
+  them to OCR.
+
+It does not:
+
+- Descend into Form XObjects (text inside a form is invisible to the
+  extractor).
+- Rotate or vertical text in the layout output. The chars come out
+  flagged with `upright = false` but the layout reconstruction
+  ignores them.
+- Handle encrypted PDFs.
+- Detect tables as structured objects.
+
+If any of those break a real PDF for you, open an issue with the file
+and what you expected.
+
+## Acknowledgments
+
+The algorithm is a port of pdfplumber. None of the analysis it does
+would have been possible without [Jeremy Singer-Vine](https://github.com/jsvine)'s
+work and the careful prior art at Tabula and in Anssi Nurminen's
+thesis. PDF parsing rides on top of [`lopdf`](https://github.com/J-F-Liu/lopdf),
+which does the heavy lifting of xref tables, FlateDecode, and content
+stream tokenization.
 
 ## License
 
-Licensed under either of [MIT](LICENSE-MIT) or [Apache 2.0](LICENSE-APACHE),
-at your option.
+MIT. See [`LICENSE`](LICENSE).

@@ -16,7 +16,7 @@
 //! once as a warm-up and its timing is discarded; pass `--no-warmup` to
 //! disable.
 
-use pdf_extractor::prelude::*;
+use pdfraw::prelude::*;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 

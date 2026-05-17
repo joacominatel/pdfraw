@@ -31,7 +31,7 @@ logic only needs to scrape the text output, not compute positions.
 ## Pattern 1 — parse the layout text with regex
 
 ```rust
-use pdf_extractor::prelude::*;
+use pdfraw::prelude::*;
 use regex::Regex;
 
 fn main() -> Result<()> {
@@ -65,7 +65,7 @@ differently, **working with coordinates** from `Page::words()` is more
 reliable:
 
 ```rust
-use pdf_extractor::prelude::*;
+use pdfraw::prelude::*;
 
 fn main() -> Result<()> {
     let doc = Document::open("invoice.pdf")?;
@@ -91,7 +91,7 @@ total column staying in the same x strip.
 ## Pattern 3 — detect scanned pages and route to OCR
 
 ```rust
-use pdf_extractor::prelude::*;
+use pdfraw::prelude::*;
 
 #[derive(Debug)]
 enum PageContent {
@@ -125,9 +125,9 @@ page 2. Use `doctop` (top accumulated across pages) on `Char` to
 associate items:
 
 ```rust
-use pdf_extractor::prelude::*;
+use pdfraw::prelude::*;
 
-fn all_words_globally_sorted(doc: &Document) -> Result<Vec<(usize, pdf_extractor::Word)>> {
+fn all_words_globally_sorted(doc: &Document) -> Result<Vec<(usize, pdfraw::Word)>> {
     let mut out = Vec::new();
     for page in doc.pages() {
         let page = page?;

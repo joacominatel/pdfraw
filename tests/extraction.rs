@@ -2,7 +2,7 @@
 
 mod common;
 
-use pdf_extractor::prelude::*;
+use pdfraw::prelude::*;
 
 #[test]
 fn opens_pdf_and_reports_page_count() {
@@ -204,7 +204,7 @@ fn document_page_returns_out_of_bounds_when_index_too_large() {
 #[test]
 fn document_open_reads_pdf_from_disk() {
     let pdf = common::build_pdf(&[(20.0, 270.0, "from disk")]);
-    let path = std::env::temp_dir().join("pdf_extractor_open_test.pdf");
+    let path = std::env::temp_dir().join("pdfraw_open_test.pdf");
     std::fs::write(&path, &pdf).unwrap();
 
     let doc = Document::open(&path).unwrap();

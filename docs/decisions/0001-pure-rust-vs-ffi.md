@@ -29,7 +29,7 @@ restrictions.
 
 - **Zero dylibs**. `cargo build` produces a self-contained binary.
 - **Trivial cross-compile** to any Rust target (including WASM).
-- **Clean licensing**: MIT/Apache-2.0 without AGPL contamination
+- **Clean licensing**: permissive (MIT) without AGPL contamination
   (mupdf-rs) or GPL chain (poppler-rs).
 - **No C/C++ build toolchain** required in CI.
 - **Direct debugging** with `cargo` and rust-analyzer, no jumping to
