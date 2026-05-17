@@ -53,8 +53,13 @@ impl<'doc> Page<'doc> {
 
     fn metrics(&self) -> &PageMetrics {
         self.metrics_cache.get_or_init(|| {
-            crate::parser::lopdf_backend::page_metrics(&self.doc.inner, self.page_id())
-                .unwrap_or(PageMetrics { width: 612.0, height: 792.0, rotation: 0 })
+            crate::parser::lopdf_backend::page_metrics(&self.doc.inner, self.page_id()).unwrap_or(
+                PageMetrics {
+                    width: 612.0,
+                    height: 792.0,
+                    rotation: 0,
+                },
+            )
         })
     }
 

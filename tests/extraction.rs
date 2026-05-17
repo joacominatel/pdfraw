@@ -39,10 +39,7 @@ fn extracts_chars_have_positive_coordinates() {
 
 #[test]
 fn extract_chars_for_multiple_lines_yields_distinct_tops() {
-    let pdf = common::build_pdf(&[
-        (20.0, 270.0, "first"),
-        (20.0, 250.0, "second"),
-    ]);
+    let pdf = common::build_pdf(&[(20.0, 270.0, "first"), (20.0, 250.0, "second")]);
     let doc = Document::from_bytes(pdf).unwrap();
     let page = doc.page(0).unwrap();
     let chars = page.chars().unwrap();
@@ -68,10 +65,7 @@ fn extract_text_returns_visible_string() {
 
 #[test]
 fn extract_text_separates_lines_with_newline() {
-    let pdf = common::build_pdf(&[
-        (20.0, 270.0, "Above"),
-        (20.0, 240.0, "Below"),
-    ]);
+    let pdf = common::build_pdf(&[(20.0, 270.0, "Above"), (20.0, 240.0, "Below")]);
     let doc = Document::from_bytes(pdf).unwrap();
     let text = doc.page(0).unwrap().extract_text().unwrap();
     let lines: Vec<&str> = text.lines().collect();
@@ -161,7 +155,7 @@ fn layout_snapshot_invoice() {
 fn text_page_is_not_reported_as_scanned() {
     let pdf = common::build_pdf(&[(20.0, 270.0, "Real text")]);
     let doc = Document::from_bytes(pdf).unwrap();
-    assert_eq!(doc.page(0).unwrap().is_scanned().unwrap(), false);
+    assert!(!doc.page(0).unwrap().is_scanned().unwrap());
 }
 
 #[test]
@@ -170,6 +164,31 @@ fn page_metrics_match_a4() {
     let doc = Document::from_bytes(pdf).unwrap();
     let page = doc.page(0).unwrap();
     // A4 portrait in points: 210mm × 297mm ≈ 595.28 × 841.89
-    assert!((page.width() - 595.28).abs() < 1.0, "width was {}", page.width());
-    assert!((page.height() - 841.89).abs() < 1.0, "height was {}", page.height());
+    assert!(
+        (page.width() - 595.28).abs() < 1.0,
+        "width was {}",
+        page.width()
+    );
+    assert!(
+        (page.height() - 841.89).abs() < 1.0,
+        "height was {}",
+        page.height()
+    );
+}
+
+#[test]
+fn multi_page_document_iterates_in_order() {
+    let pdf = common::build_two_page_pdf(
+        &[(20.0, 270.0, "Page one")],
+        &[(20.0, 270.0, "Page two")],
+    );
+    let doc = Document::from_bytes(pdf).unwrap();
+    assert_eq!(doc.num_pages(), 2);
+
+    let texts: Vec<String> = doc
+        .pages()
+        .map(|p| p.unwrap().extract_text().unwrap())
+        .collect();
+    assert!(texts[0].contains("Page one"), "page 0 = {:?}", texts[0]);
+    assert!(texts[1].contains("Page two"), "page 1 = {:?}", texts[1]);
 }

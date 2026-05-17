@@ -85,7 +85,10 @@ fn char_begins_new_word(prev: &Char, curr: &Char, opts: &WordOptions) -> bool {
         // Strong backward jump — new word.
         return true;
     }
-    let x_tol = opts.x_tolerance_ratio.map(|r| r * prev.size).unwrap_or(opts.x_tolerance);
+    let x_tol = opts
+        .x_tolerance_ratio
+        .map(|r| r * prev.size)
+        .unwrap_or(opts.x_tolerance);
     curr.x0 > prev.x1 + x_tol
 }
 
@@ -105,7 +108,10 @@ fn build_word(
     let x0 = chars.iter().map(|c| c.x0).fold(f32::INFINITY, f32::min);
     let x1 = chars.iter().map(|c| c.x1).fold(f32::NEG_INFINITY, f32::max);
     let top = chars.iter().map(|c| c.top).fold(f32::INFINITY, f32::min);
-    let bottom = chars.iter().map(|c| c.bottom).fold(f32::NEG_INFINITY, f32::max);
+    let bottom = chars
+        .iter()
+        .map(|c| c.bottom)
+        .fold(f32::NEG_INFINITY, f32::max);
 
     let char_range = char_range_for(chars, original, working, expanded);
 
@@ -295,10 +301,7 @@ mod tests {
 
     #[test]
     fn single_word_groups_adjacent_chars() {
-        let chars = vec![
-            mk("H", 0.0, 5.0, 10.0, 22.0),
-            mk("i", 5.0, 8.0, 10.0, 22.0),
-        ];
+        let chars = vec![mk("H", 0.0, 5.0, 10.0, 22.0), mk("i", 5.0, 8.0, 10.0, 22.0)];
         let words = extract_words(&chars, &WordOptions::default());
         assert_eq!(words.len(), 1);
         assert_eq!(words[0].text.as_str(), "Hi");
@@ -326,10 +329,7 @@ mod tests {
 
     #[test]
     fn extract_text_simple_inserts_newline_between_lines() {
-        let chars = vec![
-            mk("A", 0.0, 5.0, 10.0, 22.0),
-            mk("B", 0.0, 5.0, 50.0, 62.0),
-        ];
+        let chars = vec![mk("A", 0.0, 5.0, 10.0, 22.0), mk("B", 0.0, 5.0, 50.0, 62.0)];
         let text = extract_text_simple(&chars);
         assert_eq!(text, "A\nB");
     }
@@ -360,7 +360,10 @@ mod tests {
     #[test]
     fn expand_ligatures_option_replaces_fi_with_two_chars() {
         let chars = vec![mk("\u{FB01}", 0.0, 5.0, 10.0, 22.0)];
-        let opts = WordOptions { expand_ligatures: true, ..WordOptions::default() };
+        let opts = WordOptions {
+            expand_ligatures: true,
+            ..WordOptions::default()
+        };
         let words = extract_words(&chars, &opts);
         assert_eq!(words.len(), 1);
         assert_eq!(words[0].text.as_str(), "fi");
@@ -369,10 +372,7 @@ mod tests {
     #[test]
     fn layout_preserves_two_lines_with_vertical_gap() {
         // Header at top=10, body at top=50 (40pt apart, ≈3 virtual rows).
-        let chars = vec![
-            mk("H", 0.0, 5.0, 10.0, 22.0),
-            mk("B", 0.0, 5.0, 50.0, 62.0),
-        ];
+        let chars = vec![mk("H", 0.0, 5.0, 10.0, 22.0), mk("B", 0.0, 5.0, 50.0, 62.0)];
         let opts = TextOptions::pdfplumber_defaults();
         let text = extract_text_layout(&chars, &opts);
         // (50 - 10) / 13 = 3.07 → 3 newlines.

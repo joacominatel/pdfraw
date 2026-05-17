@@ -19,7 +19,8 @@ where
         return Vec::new();
     }
 
-    let mut indexed: Vec<(usize, f32)> = items.iter().enumerate().map(|(i, x)| (i, key(x))).collect();
+    let mut indexed: Vec<(usize, f32)> =
+        items.iter().enumerate().map(|(i, x)| (i, key(x))).collect();
     indexed.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
 
     let mut groups: Vec<Vec<&T>> = Vec::new();

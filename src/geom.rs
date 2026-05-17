@@ -41,7 +41,12 @@ pub struct BBox {
 impl BBox {
     /// Construct a bounding box from its four edges.
     pub const fn new(x0: f32, top: f32, x1: f32, bottom: f32) -> Self {
-        Self { x0, top, x1, bottom }
+        Self {
+            x0,
+            top,
+            x1,
+            bottom,
+        }
     }
 
     /// Width of the box.
@@ -88,7 +93,14 @@ pub struct Matrix {
 
 impl Matrix {
     /// Identity matrix.
-    pub const IDENTITY: Matrix = Matrix { a: 1.0, b: 0.0, c: 0.0, d: 1.0, e: 0.0, f: 0.0 };
+    pub const IDENTITY: Matrix = Matrix {
+        a: 1.0,
+        b: 0.0,
+        c: 0.0,
+        d: 1.0,
+        e: 0.0,
+        f: 0.0,
+    };
 
     /// Construct from the 6 affine components, in PDF operator order.
     pub const fn new(a: f32, b: f32, c: f32, d: f32, e: f32, f: f32) -> Self {
@@ -97,12 +109,26 @@ impl Matrix {
 
     /// Pure translation.
     pub const fn translation(tx: f32, ty: f32) -> Self {
-        Self { a: 1.0, b: 0.0, c: 0.0, d: 1.0, e: tx, f: ty }
+        Self {
+            a: 1.0,
+            b: 0.0,
+            c: 0.0,
+            d: 1.0,
+            e: tx,
+            f: ty,
+        }
     }
 
     /// Pure scale.
     pub const fn scale(sx: f32, sy: f32) -> Self {
-        Self { a: sx, b: 0.0, c: 0.0, d: sy, e: 0.0, f: 0.0 }
+        Self {
+            a: sx,
+            b: 0.0,
+            c: 0.0,
+            d: sy,
+            e: 0.0,
+            f: 0.0,
+        }
     }
 
     /// Matrix multiplication: `self * other`.

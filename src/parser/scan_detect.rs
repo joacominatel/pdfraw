@@ -10,18 +10,20 @@
 
 use crate::error::{Error, Result};
 use crate::page::Page;
-use lopdf::content::Content;
 use lopdf::Object;
+use lopdf::content::Content;
 
 /// Returns `true` when the page appears to be a scanned image with no real
 /// text content.
 pub(crate) fn is_scanned(page: &Page<'_>) -> Result<bool> {
     let doc = &page.document().inner;
     let page_id = page.page_id();
-    let raw = doc.get_page_content(page_id).map_err(|e| Error::ContentStream {
-        page: page.index(),
-        reason: format!("get_page_content: {e}"),
-    })?;
+    let raw = doc
+        .get_page_content(page_id)
+        .map_err(|e| Error::ContentStream {
+            page: page.index(),
+            reason: format!("get_page_content: {e}"),
+        })?;
     let content = Content::decode(&raw).map_err(|e| Error::ContentStream {
         page: page.index(),
         reason: format!("decode content: {e}"),

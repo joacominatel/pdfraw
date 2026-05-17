@@ -64,7 +64,10 @@ mod tests {
     #[test]
     fn extracts_single_override() {
         let doc = lopdf::Document::new();
-        let font = diffs_dict(vec![Object::Integer(169), Object::Name(b"copyright".to_vec())]);
+        let font = diffs_dict(vec![
+            Object::Integer(169),
+            Object::Name(b"copyright".to_vec()),
+        ]);
         let d = extract(&doc, &font).unwrap();
         assert_eq!(d.get(&169), Some(&'©'));
     }

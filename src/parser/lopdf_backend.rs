@@ -16,12 +16,11 @@ use std::collections::HashMap;
 /// Read width/height/rotation for the page.
 pub(crate) fn page_metrics(doc: &LDoc, page_id: ObjectId) -> Result<PageMetrics> {
     let page = doc.get_dictionary(page_id).map_err(Error::from)?;
-    let media_box = resolve_inheritable(doc, page, b"MediaBox").ok_or_else(|| {
-        Error::ContentStream {
+    let media_box =
+        resolve_inheritable(doc, page, b"MediaBox").ok_or_else(|| Error::ContentStream {
             page: 0,
             reason: "missing /MediaBox".into(),
-        }
-    })?;
+        })?;
     let (width, height) = media_box_dimensions(&media_box)?;
     let rotation = resolve_inheritable(doc, page, b"Rotate")
         .and_then(|o| match o {
@@ -29,7 +28,11 @@ pub(crate) fn page_metrics(doc: &LDoc, page_id: ObjectId) -> Result<PageMetrics>
             _ => None,
         })
         .unwrap_or(0);
-    Ok(PageMetrics { width, height, rotation })
+    Ok(PageMetrics {
+        width,
+        height,
+        rotation,
+    })
 }
 
 fn resolve_inheritable(doc: &LDoc, page: &Dictionary, key: &[u8]) -> Option<Object> {
@@ -98,10 +101,12 @@ pub(crate) fn extract_chars(page: &Page<'_>) -> Result<Vec<Char>> {
     let page_id = page.page_id();
     let page_height = page.height();
 
-    let raw = doc.get_page_content(page_id).map_err(|e| Error::ContentStream {
-        page: page.index(),
-        reason: format!("get_page_content: {e}"),
-    })?;
+    let raw = doc
+        .get_page_content(page_id)
+        .map_err(|e| Error::ContentStream {
+            page: page.index(),
+            reason: format!("get_page_content: {e}"),
+        })?;
     let content = Content::decode(&raw).map_err(|e| Error::ContentStream {
         page: page.index(),
         reason: format!("decode content: {e}"),
@@ -151,9 +156,10 @@ pub(crate) fn extract_chars(page: &Page<'_>) -> Result<Vec<Char>> {
 
             // text state
             "Tf" => {
-                if let (Some(name), Some(size)) =
-                    (op.operands.first().and_then(name_of), op.operands.get(1).and_then(num_of))
-                {
+                if let (Some(name), Some(size)) = (
+                    op.operands.first().and_then(name_of),
+                    op.operands.get(1).and_then(num_of),
+                ) {
                     ts.font_name = name;
                     ts.font_size = size;
                 }
@@ -173,18 +179,20 @@ pub(crate) fn extract_chars(page: &Page<'_>) -> Result<Vec<Char>> {
                 }
             }
             "Td" => {
-                if let (Some(tx), Some(ty)) =
-                    (op.operands.first().and_then(num_of), op.operands.get(1).and_then(num_of))
-                {
+                if let (Some(tx), Some(ty)) = (
+                    op.operands.first().and_then(num_of),
+                    op.operands.get(1).and_then(num_of),
+                ) {
                     let new = Matrix::translation(tx, ty).then(ts.tlm);
                     ts.tm = new;
                     ts.tlm = new;
                 }
             }
             "TD" => {
-                if let (Some(tx), Some(ty)) =
-                    (op.operands.first().and_then(num_of), op.operands.get(1).and_then(num_of))
-                {
+                if let (Some(tx), Some(ty)) = (
+                    op.operands.first().and_then(num_of),
+                    op.operands.get(1).and_then(num_of),
+                ) {
                     ts.leading = -ty;
                     let new = Matrix::translation(tx, ty).then(ts.tlm);
                     ts.tm = new;
@@ -198,59 +206,54 @@ pub(crate) fn extract_chars(page: &Page<'_>) -> Result<Vec<Char>> {
             }
 
             // text showing
-            "Tj" => {
-                if in_text {
-                    if let Some(bytes) = first_string(&op.operands) {
-                        emit_string(&bytes, &mut ts, &gs_stack, &fonts, page_height, &mut out);
-                    }
+            "Tj" if in_text => {
+                if let Some(bytes) = first_string(&op.operands) {
+                    emit_string(&bytes, &mut ts, &gs_stack, &fonts, page_height, &mut out);
                 }
             }
-            "'" => {
-                if in_text {
-                    // next line + show
-                    let new = Matrix::translation(0.0, -ts.leading).then(ts.tlm);
-                    ts.tm = new;
-                    ts.tlm = new;
-                    if let Some(bytes) = first_string(&op.operands) {
-                        emit_string(&bytes, &mut ts, &gs_stack, &fonts, page_height, &mut out);
-                    }
+            "'" if in_text => {
+                // next line + show
+                let new = Matrix::translation(0.0, -ts.leading).then(ts.tlm);
+                ts.tm = new;
+                ts.tlm = new;
+                if let Some(bytes) = first_string(&op.operands) {
+                    emit_string(&bytes, &mut ts, &gs_stack, &fonts, page_height, &mut out);
                 }
             }
-            "\"" => {
-                if in_text {
-                    // operands: aw ac string
-                    if op.operands.len() == 3 {
-                        ts.word_space = num_of(&op.operands[0]).unwrap_or(0.0);
-                        ts.char_space = num_of(&op.operands[1]).unwrap_or(0.0);
-                    }
-                    let new = Matrix::translation(0.0, -ts.leading).then(ts.tlm);
-                    ts.tm = new;
-                    ts.tlm = new;
-                    if let Some(bytes) =
-                        op.operands.last().and_then(|o| string_bytes(o))
-                    {
-                        emit_string(&bytes, &mut ts, &gs_stack, &fonts, page_height, &mut out);
-                    }
+            "\"" if in_text => {
+                // operands: aw ac string
+                if op.operands.len() == 3 {
+                    ts.word_space = num_of(&op.operands[0]).unwrap_or(0.0);
+                    ts.char_space = num_of(&op.operands[1]).unwrap_or(0.0);
+                }
+                let new = Matrix::translation(0.0, -ts.leading).then(ts.tlm);
+                ts.tm = new;
+                ts.tlm = new;
+                if let Some(bytes) = op.operands.last().and_then(string_bytes) {
+                    emit_string(&bytes, &mut ts, &gs_stack, &fonts, page_height, &mut out);
                 }
             }
-            "TJ" => {
-                if in_text {
-                    if let Some(Object::Array(arr)) = op.operands.first() {
-                        for item in arr {
-                            match item {
-                                Object::String(bytes, _) => emit_string(
-                                    bytes, &mut ts, &gs_stack, &fonts, page_height, &mut out,
-                                ),
-                                Object::Integer(i) => {
-                                    let tx = -(*i as f32 / 1000.0) * ts.font_size * ts.h_scale;
-                                    ts.tm = Matrix::translation(tx, 0.0).then(ts.tm);
-                                }
-                                Object::Real(r) => {
-                                    let tx = -(*r / 1000.0) * ts.font_size * ts.h_scale;
-                                    ts.tm = Matrix::translation(tx, 0.0).then(ts.tm);
-                                }
-                                _ => {}
+            "TJ" if in_text => {
+                if let Some(Object::Array(arr)) = op.operands.first() {
+                    for item in arr {
+                        match item {
+                            Object::String(bytes, _) => emit_string(
+                                bytes,
+                                &mut ts,
+                                &gs_stack,
+                                &fonts,
+                                page_height,
+                                &mut out,
+                            ),
+                            Object::Integer(i) => {
+                                let tx = -(*i as f32 / 1000.0) * ts.font_size * ts.h_scale;
+                                ts.tm = Matrix::translation(tx, 0.0).then(ts.tm);
                             }
+                            Object::Real(r) => {
+                                let tx = -(*r / 1000.0) * ts.font_size * ts.h_scale;
+                                ts.tm = Matrix::translation(tx, 0.0).then(ts.tm);
+                            }
+                            _ => {}
                         }
                     }
                 }
@@ -412,11 +415,17 @@ struct Widths {
 
 impl Widths {
     fn empty() -> Self {
-        Self { by_code: HashMap::new(), default_width: 0.5 }
+        Self {
+            by_code: HashMap::new(),
+            default_width: 0.5,
+        }
     }
 
     fn width_of(&self, code: u32) -> f32 {
-        self.by_code.get(&code).copied().unwrap_or(self.default_width)
+        self.by_code
+            .get(&code)
+            .copied()
+            .unwrap_or(self.default_width)
     }
 }
 
@@ -429,13 +438,21 @@ impl<'doc> FontInfo<'doc> {
         );
         let widths = if is_composite {
             crate::parser::fonts::widths::extract_type0(doc, dict)
-                .map(|by_code| Widths { by_code, default_width: 0.5 })
+                .map(|by_code| Widths {
+                    by_code,
+                    default_width: 0.5,
+                })
                 .unwrap_or_else(Widths::empty)
         } else {
             simple_widths(dict).unwrap_or_else(Widths::empty)
         };
         let differences = crate::parser::fonts::differences::extract(doc, dict);
-        Self { encoding, widths, is_composite, differences }
+        Self {
+            encoding,
+            widths,
+            is_composite,
+            differences,
+        }
     }
 }
 
@@ -454,8 +471,16 @@ fn simple_widths(dict: &Dictionary) -> Option<Widths> {
             by_code.insert(first_char + i as u32, v / 1000.0);
         }
     }
-    let default_width = dict.get(b"MissingWidth").ok().and_then(num_of).map(|v| v / 1000.0).unwrap_or(0.5);
-    Some(Widths { by_code, default_width })
+    let default_width = dict
+        .get(b"MissingWidth")
+        .ok()
+        .and_then(num_of)
+        .map(|v| v / 1000.0)
+        .unwrap_or(0.5);
+    Some(Widths {
+        by_code,
+        default_width,
+    })
 }
 
 // ============================================================================
@@ -473,7 +498,9 @@ fn emit_string(
     let ctm = *gs_stack.last().unwrap_or(&Matrix::IDENTITY);
     let font = fonts.get(&ts.font_name);
 
-    let decoded: String = font.map(|f| f.decode(bytes)).unwrap_or_else(|| latin1(bytes));
+    let decoded: String = font
+        .map(|f| f.decode(bytes))
+        .unwrap_or_else(|| latin1(bytes));
 
     let fontname_str = String::from_utf8_lossy(&ts.font_name).into_owned();
     let fontname = CompactString::from(&fontname_str);
@@ -498,12 +525,8 @@ fn emit_string(
 
     // Iterate decoded chars in parallel with codes, using whichever is
     // shorter (defensive — they should match in length most of the time).
-    let mut decoded_chars = decoded.chars().peekable();
-    let mut code_idx = 0usize;
-
-    while let Some(ch) = decoded_chars.next() {
+    for (code_idx, ch) in decoded.chars().enumerate() {
         let code = codes.get(code_idx).copied().unwrap_or(0);
-        code_idx += 1;
 
         let w = font.map(|f| f.widths.width_of(code)).unwrap_or(0.5);
         let glyph_width = w * ts.font_size;

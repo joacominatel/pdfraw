@@ -22,10 +22,8 @@ fn parse_uni_name(name: &str) -> Option<char> {
     // Adobe convention: glyphs of the form "uni0041" or "u0041".
     let hex = if let Some(rest) = name.strip_prefix("uni") {
         rest
-    } else if let Some(rest) = name.strip_prefix('u') {
-        rest
     } else {
-        return None;
+        name.strip_prefix('u')?
     };
     if hex.len() < 4 || !hex.chars().all(|c| c.is_ascii_hexdigit()) {
         return None;
@@ -115,7 +113,7 @@ mod tests {
     }
 
     #[test]
-    fn uniXXXX_name_is_parsed() {
+    fn uni_hex_name_is_parsed() {
         assert_eq!(lookup("/uni00E9"), Some('é'));
     }
 }

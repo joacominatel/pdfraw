@@ -45,7 +45,9 @@ impl TextOptions {
 
     /// Begin a fluent builder.
     pub fn builder() -> TextOptionsBuilder {
-        TextOptionsBuilder { inner: Self::pdfplumber_defaults() }
+        TextOptionsBuilder {
+            inner: Self::pdfplumber_defaults(),
+        }
     }
 }
 

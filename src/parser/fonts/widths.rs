@@ -113,7 +113,10 @@ mod tests {
         cid_dict.set(b"W".to_vec(), Object::Array(w));
         let cid_id = doc.add_object(Object::Dictionary(cid_dict));
         let mut font = Dictionary::new();
-        font.set(b"DescendantFonts".to_vec(), Object::Array(vec![Object::Reference(cid_id)]));
+        font.set(
+            b"DescendantFonts".to_vec(),
+            Object::Array(vec![Object::Reference(cid_id)]),
+        );
         (doc, font)
     }
 
