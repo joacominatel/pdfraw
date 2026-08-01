@@ -519,33 +519,52 @@ struct FontInfo<'doc> {
     differences: Option<crate::parser::fonts::differences::Differences>,
 }
 
+/// One glyph code from a shown string, with the text it decodes to.
+///
+/// The text is a `String`, not a `char`, because a `/ToUnicode` entry may map
+/// one code to several characters (`<0041>` → `"fi"`), and it may be empty
+/// when the encoding defines no glyph for the code.
+struct DecodedCode {
+    code: u32,
+    text: String,
+}
+
 impl FontInfo<'_> {
-    /// Decode one glyph code into the Unicode string it produces. Returns
-    /// `(text, advance_bytes)` so callers can iterate variable-length codes
-    /// in composite fonts.
-    fn decode(&self, bytes: &[u8]) -> String {
-        // If we have a per-code override from /Differences, build the
-        // decoded string ourselves so we can substitute on byte basis. We
-        // only do this for simple fonts (1 byte per code).
-        if let Some(diffs) = &self.differences
-            && !self.is_composite
-        {
-            let mut s = String::with_capacity(bytes.len());
-            let base_decoded = match &self.encoding {
-                Some(enc) => enc.bytes_to_string(bytes).ok(),
-                None => None,
-            };
-            let base_chars: Option<Vec<char>> = base_decoded.as_ref().map(|d| d.chars().collect());
-            for (i, b) in bytes.iter().enumerate() {
-                if let Some(c) = diffs.get(b) {
-                    s.push(*c);
-                } else if let Some(bc) = base_chars.as_ref().and_then(|v| v.get(i)) {
-                    s.push(*bc);
-                } else {
-                    s.push(*b as char);
+    /// Split a shown string into its glyph codes, decoding each one on its own.
+    ///
+    /// Decoding the whole string at once and then zipping the result against
+    /// the code list assumed the two lined up index for index. They do not:
+    /// an encoding that defines no glyph for a code yields a shorter string,
+    /// and a one-to-many `/ToUnicode` entry yields a longer one. Either way
+    /// every following glyph took the wrong code — and so the wrong width and
+    /// the wrong advance. Decoding per code removes the assumption entirely.
+    fn decode_codes(&self, bytes: &[u8]) -> Vec<DecodedCode> {
+        // Composite fonts are read two bytes at a time. This is still an
+        // approximation — a real CMap may define variable-length ranges — but
+        // it is now applied consistently to codes *and* text.
+        let chunk = if self.is_composite { 2 } else { 1 };
+        bytes
+            .chunks(chunk)
+            .map(|c| {
+                let code = c.iter().fold(0u32, |acc, &b| (acc << 8) | b as u32);
+                DecodedCode {
+                    code,
+                    text: self.decode_one(c, code),
                 }
-            }
-            return s;
+            })
+            .collect()
+    }
+
+    /// Decode a single code's bytes into the text it produces.
+    fn decode_one(&self, bytes: &[u8], code: u32) -> String {
+        // A /Differences override wins, but only for simple fonts: the array
+        // is indexed by single byte codes.
+        if !self.is_composite
+            && let Some(diffs) = &self.differences
+            && let Ok(byte) = u8::try_from(code)
+            && let Some(c) = diffs.get(&byte)
+        {
+            return c.to_string();
         }
         match &self.encoding {
             Some(enc) => enc.bytes_to_string(bytes).unwrap_or_else(|_| latin1(bytes)),
@@ -662,36 +681,25 @@ fn emit_string(
     let ts = &gs.text;
     let font = fonts.get(&ts.font_name);
 
-    let decoded: String = font
-        .map(|f| f.decode(bytes))
-        .unwrap_or_else(|| latin1(bytes));
-
     let fontname_str = String::from_utf8_lossy(&ts.font_name).into_owned();
     let fontname = CompactString::from(&fontname_str);
 
     let is_composite = font.is_some_and(|f| f.is_composite);
 
-    // Phase 1 simplification: we map decoded chars to byte positions by
-    // walking bytes one-by-one for simple fonts and 2-by-2 for composite.
-    // This is an approximation; multi-byte CMap ranges may shift things.
-    let codes: Vec<u32> = if is_composite {
-        bytes
-            .chunks(2)
-            .map(|c| match c {
-                [a, b] => ((*a as u32) << 8) | *b as u32,
-                [a] => *a as u32,
-                _ => 0,
+    // One entry per glyph code, each carrying its own decoded text. Codes and
+    // text can no longer drift apart, however the encoding behaves.
+    let decoded: Vec<DecodedCode> = match font {
+        Some(f) => f.decode_codes(bytes),
+        None => bytes
+            .iter()
+            .map(|&b| DecodedCode {
+                code: b as u32,
+                text: (b as char).to_string(),
             })
-            .collect()
-    } else {
-        bytes.iter().map(|&b| b as u32).collect()
+            .collect(),
     };
 
-    // Iterate decoded chars in parallel with codes, using whichever is
-    // shorter (defensive — they should match in length most of the time).
-    for (code_idx, ch) in decoded.chars().enumerate() {
-        let code = codes.get(code_idx).copied().unwrap_or(0);
-
+    for DecodedCode { code, text } in decoded {
         let w = font.map(|f| f.widths.width_of(code)).unwrap_or(0.5);
         let glyph_width = w * ts.font_size;
 
@@ -729,9 +737,15 @@ fn emit_string(
             (bottom, top)
         };
 
-        if !ch.is_control() {
+        // A code the encoding defines no glyph for still occupies a position
+        // and still advances — it just draws nothing, so no Char is emitted.
+        // A code that decodes to several characters produces one Char holding
+        // them all, which is what `Char::text` already documents, and advances
+        // once rather than once per character.
+        let visible: String = text.chars().filter(|c| !c.is_control()).collect();
+        if !visible.is_empty() {
             out.push(Char {
-                text: CompactString::from(ch.to_string().as_str()),
+                text: CompactString::from(visible.as_str()),
                 x0,
                 x1,
                 top,
