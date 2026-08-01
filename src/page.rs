@@ -190,6 +190,19 @@ impl<'doc> Page<'doc> {
             .as_slice())
     }
 
+    /// The page's chars with double-struck copies removed.
+    ///
+    /// A generator that fakes bold by drawing the same string twice, a
+    /// fraction of a point apart, leaves two glyphs per character. See
+    /// [`crate::text::dedupe::dedupe_chars`] for the rule and for the
+    /// tolerance's meaning; `1.0` is the value pdfplumber defaults to.
+    ///
+    /// This allocates a new `Vec` rather than touching the cache, so
+    /// [`Self::chars`] keeps reporting what the file actually contains.
+    pub fn dedupe_chars(&self, tolerance: f32) -> Result<Vec<Char>> {
+        Ok(crate::text::dedupe::dedupe_chars(self.chars()?, tolerance))
+    }
+
     /// Cluster the page's chars into words using `opts`.
     pub fn words(&self, opts: &WordOptions) -> Result<Vec<Word>> {
         let chars = self.chars()?;
@@ -203,9 +216,19 @@ impl<'doc> Page<'doc> {
     }
 
     /// Layout-preserving text — replicates pdfplumber's `extract_text(layout=True)`.
+    ///
+    /// Honours [`TextOptions::dedupe_tolerance`]: when set, double-struck
+    /// glyphs are removed before layout, which is what stops fake bold from
+    /// coming out as `SSAALLDDOO`.
     pub fn extract_text_layout(&self, opts: &TextOptions) -> Result<String> {
         let chars = self.chars()?;
-        Ok(crate::text::extractor::extract_text_layout(chars, opts))
+        Ok(match opts.dedupe_tolerance {
+            Some(t) => {
+                let deduped = crate::text::dedupe::dedupe_chars(chars, t);
+                crate::text::extractor::extract_text_layout(&deduped, opts)
+            }
+            None => crate::text::extractor::extract_text_layout(chars, opts),
+        })
     }
 
     /// Return `Ok(true)` when the page emits no text-showing operators but

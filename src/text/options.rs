@@ -26,6 +26,17 @@ pub struct TextOptions {
     pub use_text_flow: bool,
     /// If `true`, expand multi-codepoint ligatures.
     pub expand_ligatures: bool,
+    /// When `Some(t)`, drop double-struck glyphs within `t` points before
+    /// laying the page out.
+    ///
+    /// Some generators fake bold by drawing a string twice a fraction of a
+    /// point apart. Both copies are really in the file, so the parser reports
+    /// both, and the layout grid then interleaves them into
+    /// `SSAALLDDOO`. `Some(1.0)` is pdfplumber's default for its own
+    /// `dedupe_chars`; `None` — the default here — changes nothing, so the
+    /// glyph stream stays a faithful account of the file unless asked
+    /// otherwise.
+    pub dedupe_tolerance: Option<f32>,
 }
 
 impl TextOptions {
@@ -39,6 +50,7 @@ impl TextOptions {
             y_density: 13.0,
             keep_blank_chars: false,
             use_text_flow: false,
+            dedupe_tolerance: None,
             expand_ligatures: false,
         }
     }
@@ -102,6 +114,14 @@ impl TextOptionsBuilder {
     /// Expand ligatures (e.g. `ﬁ → fi`).
     pub fn expand_ligatures(mut self, v: bool) -> Self {
         self.inner.expand_ligatures = v;
+        self
+    }
+    /// Drop double-struck glyphs within `v` points before laying out.
+    ///
+    /// Use this on documents that fake bold by drawing a string twice; `1.0`
+    /// is what pdfplumber uses. See [`TextOptions::dedupe_tolerance`].
+    pub fn dedupe_tolerance(mut self, v: f32) -> Self {
+        self.inner.dedupe_tolerance = Some(v);
         self
     }
     /// Build the final [`TextOptions`].
