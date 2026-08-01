@@ -91,7 +91,6 @@ fn extract_words_keeps_every_glyph_when_tops_contain_nan() {
 }
 
 #[test]
-#[ignore = "BUG: build_word folds bounds with f32::min/max, which ignore NaN, so a NaN coordinate is laundered into ±infinity and then saturates the layout grid"]
 fn extract_words_does_not_launder_nan_coordinates_into_infinity() {
     let chars = vec![ch("A", f32::NAN, f32::NAN, f32::NAN, f32::NAN)];
     let words = extract_words(&chars, &WordOptions::default());
@@ -116,7 +115,6 @@ fn extract_words_does_not_launder_nan_coordinates_into_infinity() {
 // ---------------------------------------------------------------------------
 
 #[test]
-#[ignore = "BUG: the layout grid is not clipped to the page box, so one off-page glyph inflates the output to hundreds of MB"]
 fn extract_text_layout_bounds_output_when_a_glyph_lies_far_off_the_page() {
     // Two glyphs. The second one claims x0 = 1e8 points (~35 km).
     let chars = vec![
@@ -135,7 +133,6 @@ fn extract_text_layout_bounds_output_when_a_glyph_lies_far_off_the_page() {
 }
 
 #[test]
-#[ignore = "BUG: y_density = 0 divides by zero, saturating the newline count to i32::MAX and attempting a ~2 GiB allocation"]
 fn extract_text_layout_terminates_when_y_density_is_zero() {
     let chars = vec![
         ch("A", 0.0, 10.0, 10.0, 22.0),
@@ -152,7 +149,6 @@ fn extract_text_layout_terminates_when_y_density_is_zero() {
 }
 
 #[test]
-#[ignore = "BUG: x_density = 0 divides by zero, saturating the space count to i32::MAX and attempting a ~2 GiB allocation"]
 fn extract_text_layout_terminates_when_x_density_is_zero() {
     let chars = vec![
         ch("A", 0.0, 10.0, 10.0, 22.0),
