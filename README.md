@@ -50,10 +50,11 @@ until 0.2 lands.
 
 ```toml
 [dependencies]
-pdfraw = { git = "https://github.com/joacominatel/pdfraw" }
+pdfraw = "0.1"
 ```
 
-The crate is not on crates.io yet.
+Requires Rust 1.88 or newer — that floor comes from `lopdf`, not from
+anything this crate does.
 
 ## The command-line tool
 
