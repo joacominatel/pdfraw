@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 While the crate is pre-1.0, behavioural changes may land in patch releases;
 see the Status section of the README.
 
+## [Unreleased]
+
+### Fixed
+
+- **Text inside a Form XObject was silently dropped.** The parser walked the
+  page's own content stream but never executed `Do`, so anything the page
+  delegated to a form was missing from `chars()` and from every extractor
+  built on it — with no error and no warning.
+
+  `Do` now executes a `/Subtype /Form` XObject inline: its `/Matrix` is
+  concatenated onto the CTM, its `/Resources` supply the fonts (falling back
+  to the invoking stream's when it has none), and the whole invocation is
+  bracketed like `q` … `Q` so nothing leaks past it. `/Image` XObjects stay
+  ignored, since their bytes are samples rather than operators.
+
+  Measured against pdfplumber 0.11.10 on a three-page bank statement with
+  five form XObjects, this closes the gap from **273 missing glyphs (2.00%)
+  to 0**; `chars()` now returns the same 6677 glyphs on page 0 that
+  pdfplumber does. A 13-page PDF with no form XObjects was unaffected in
+  both directions.
+
+  Recursion is capped at 16 levels, and a form that names itself — directly
+  or through a cycle — is skipped rather than followed.
+
 ## [0.1.3] - 2026-08-01
 
 Clears the entire known-defect backlog. The adversarial suite found 28
