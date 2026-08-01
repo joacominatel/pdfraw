@@ -176,22 +176,36 @@ impl Matrix {
         (self.c * self.c + self.d * self.d).sqrt()
     }
 
-    /// True when the matrix is axis-aligned and not rotated, sheared or
-    /// flipped beyond a relative tolerance of 0.01.
+    /// True when the matrix lays text along a horizontal baseline running
+    /// left to right.
+    ///
+    /// This is the test that decides whether a glyph takes part in layout
+    /// reconstruction, so what it cares about is the direction of the writing
+    /// line, not the shape of the glyphs on it.
+    ///
+    /// The matrix maps the text-space x axis onto `(a, b)`. `b` is therefore
+    /// what tips the baseline off the horizontal, and it has to stay near
+    /// zero. `c` is a different thing: it slants the glyphs while leaving the
+    /// baseline flat, which is how a synthetic oblique — fake italic for a
+    /// font with no italic cut — is built. Such text reads along an ordinary
+    /// horizontal line and belongs in the layout. Requiring `c` to be near
+    /// zero as well dropped it.
     ///
     /// A degenerate matrix — one with no meaningful scale, or with a zero
     /// vertical scale — is never upright: it does not describe a readable
     /// orientation at all.
+    ///
+    /// pdfminer makes the looser call `a * d * scaling > 0 && b * c <= 0`,
+    /// which admits any rotation short of a quarter turn. That is too loose
+    /// here: 45°-rotated text is not part of a horizontal line.
     pub fn is_upright(&self) -> bool {
-        // For an upright matrix `a > 0`, `d != 0`, and the skew/shear
-        // coefficients (`b`, `c`) are near zero relative to the main diagonal.
         let scale = self.x_scale().max(self.y_scale());
         // Clamping the divisor to a floor here would make *any* matrix
-        // smaller than the floor pass the shear test, rotated or not.
+        // smaller than the floor pass the baseline test, rotated or not.
         if !scale.is_finite() || scale <= 1e-6 || self.d == 0.0 {
             return false;
         }
-        self.b.abs() / scale < 0.01 && self.c.abs() / scale < 0.01 && self.a > 0.0
+        self.b.abs() / scale < 0.01 && self.a > 0.0
     }
 }
 

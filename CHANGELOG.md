@@ -11,6 +11,22 @@ see the Status section of the README.
 
 ### Fixed
 
+- **Synthetic-oblique text was filtered out of the layout.**
+  `Matrix::is_upright` rejected any shear, and `extract_text_layout` filters
+  on `Char::upright`, so text drawn with a fake-italic matrix vanished from
+  the layout output while `chars()` reported it correctly.
+
+  The matrix maps the text-space x axis onto `(a, b)`, so `b` is what tips
+  the baseline off the horizontal — and only `b` is checked now. `c` slants
+  the glyphs while leaving the baseline flat, which is exactly how an oblique
+  is built for a font with no italic cut; such text reads along an ordinary
+  line and belongs in the layout. On one statement page this recovered 274
+  glyphs across four lines.
+
+  Deliberately *not* pdfminer's rule (`a * d * scaling > 0 && b * c <= 0`),
+  which admits any rotation short of a quarter turn — 45°-rotated text is not
+  part of a horizontal line, and the existing test pinning that still holds.
+
 - **Text inside a Form XObject was silently dropped.** The parser walked the
   page's own content stream but never executed `Do`, so anything the page
   delegated to a form was missing from `chars()` and from every extractor
