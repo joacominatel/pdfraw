@@ -141,19 +141,23 @@ jobs:
       - name: Reject stray files in the package
         run: |
           set -euo pipefail
-          cargo package --list --locked > files.txt
+          # Outside the working tree, deliberately. A redirect creates the file
+          # before cargo runs, so writing it here would leave the tree dirty
+          # and cargo would refuse to package at all.
+          list="$RUNNER_TEMP/package-files.txt"
+          cargo package --list --locked > "$list"
           echo "Package contents:"
-          cat files.txt
+          cat "$list"
           # An empty list must not pass. `grep -v` finds no matches in an empty
           # file, which reads as success and would wave through a run where
           # `cargo package` produced nothing at all.
-          if [ ! -s files.txt ]; then
+          if [ ! -s "$list" ]; then
             echo "::error::cargo package listed no files; refusing to treat that as a pass."
             exit 1
           fi
           # Anything outside these paths is either a fixture that escaped the
           # exclude list or something nobody meant to publish.
-          if grep -vE '^(src/|tests/|examples/|docs/|Cargo\.(toml|lock)|Cargo\.toml\.orig|README\.md|CHANGELOG\.md|LICENSE|\.gitignore|\.cargo_vcs_info\.json)' files.txt; then
+          if grep -vE '^(src/|tests/|examples/|docs/|Cargo\.(toml|lock)|Cargo\.toml\.orig|README\.md|CHANGELOG\.md|LICENSE|\.gitignore|\.cargo_vcs_info\.json)' "$list"; then
             echo '::error::The lines above are not expected in the published package. Add them to the exclude list in Cargo.toml.'
             exit 1
           fi
