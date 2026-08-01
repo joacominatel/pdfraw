@@ -19,6 +19,9 @@ exclude = [
     # Local corpus for manual testing. These are third-party documents we
     # have no right to redistribute, and they dwarf the actual crate.
     "pdf/",
+    # CI configuration is for this repository, not for anyone consuming the
+    # crate from crates.io.
+    ".github/",
 ]
 
 [lib]

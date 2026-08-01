@@ -1,0 +1,23 @@
+version: 2
+updates:
+  # The workflow pins actions to commit SHAs, which is what stops a moved tag
+  # from silently changing what CI runs. The cost is that pins go stale on
+  # their own, so Dependabot is what keeps them current — it reads the
+  # `# vX.Y.Z` comment beside each SHA to know what the pin represents.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: "chore(ci)"
+
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: "chore(deps)"
+    # A dependency bump can quietly raise the real minimum Rust version, which
+    # is exactly how 0.1.1 shipped a false MSRV. The msrv job in CI is what
+    # catches it, so these must not be auto-merged without a green run.
+    open-pull-requests-limit: 5
