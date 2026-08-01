@@ -1,7 +1,7 @@
 //! Char → Word → Line → layout text reconstruction.
 //!
-//! This module owns the algorithms; backends in [`crate::parser`] feed it
-//! a flat slice of [`Char`]s and it produces user-facing text.
+//! This module owns the algorithms; the internal parser backend feeds it a
+//! flat slice of [`Char`]s and it produces user-facing text.
 
 use crate::char::Char;
 use crate::text::cluster::cluster_objects;
@@ -58,40 +58,47 @@ pub fn extract_words(chars: &[Char], opts: &WordOptions) -> Vec<Word> {
         indices.sort_by(|&a, &b| compare_chars(&working[a], &working[b]));
     }
 
-    let ordered: Vec<&Char> = indices.iter().map(|&i| &working[i]).collect();
-    let lines = cluster_objects(&ordered, |c| c.top, opts.y_tolerance);
+    // Carry each char's index in `working` alongside the reference. The
+    // index is what `Word::char_range` is built from; recovering it later by
+    // scanning for a matching pointer would be both quadratic and wrong when
+    // the positional sort reorders a word's chars.
+    let ordered: Vec<Indexed<'_>> = indices.iter().map(|&i| (i, &working[i])).collect();
+    let lines = cluster_objects(&ordered, |(_, c)| c.top, opts.y_tolerance);
 
     let mut out = Vec::new();
     for line in lines {
-        let mut line: Vec<&Char> = line.into_iter().copied().collect();
-        line.sort_by(|a, b| a.x0.partial_cmp(&b.x0).unwrap_or(Ordering::Equal));
+        let mut line: Vec<Indexed<'_>> = line.into_iter().copied().collect();
+        line.sort_by(|(_, a), (_, b)| a.x0.partial_cmp(&b.x0).unwrap_or(Ordering::Equal));
 
-        let mut current: Vec<&Char> = Vec::new();
-        for c in line {
-            if let Some(prev) = current.last() {
+        let mut current: Vec<Indexed<'_>> = Vec::new();
+        for (idx, c) in line {
+            if let Some((_, prev)) = current.last() {
                 if char_begins_new_word(prev, c, opts) {
-                    if let Some(w) = build_word(&current, &working) {
+                    if let Some(w) = build_word(&current) {
                         out.push(w);
                     }
                     current.clear();
                 }
             }
             if !opts.keep_blank_chars && c.text.chars().all(char::is_whitespace) {
-                if let Some(w) = build_word(&current, &working) {
+                if let Some(w) = build_word(&current) {
                     out.push(w);
                 }
                 current.clear();
                 continue;
             }
-            current.push(c);
+            current.push((idx, c));
         }
-        if let Some(w) = build_word(&current, &working) {
+        if let Some(w) = build_word(&current) {
             out.push(w);
         }
     }
 
     out
 }
+
+/// A char paired with its index in the working slice.
+type Indexed<'a> = (usize, &'a Char);
 
 fn char_begins_new_word(prev: &Char, curr: &Char, opts: &WordOptions) -> bool {
     if (prev.top - curr.top).abs() > opts.y_tolerance {
@@ -108,19 +115,22 @@ fn char_begins_new_word(prev: &Char, curr: &Char, opts: &WordOptions) -> bool {
     curr.x0 > prev.x1 + x_tol
 }
 
-fn build_word(chars: &[&Char], working: &[Char]) -> Option<Word> {
-    let first = *chars.first()?;
-    let last = *chars.last()?;
-    let text: String = chars.iter().map(|c| c.text.as_str()).collect();
-    let x0 = chars.iter().map(|c| c.x0).fold(f32::INFINITY, f32::min);
-    let x1 = chars.iter().map(|c| c.x1).fold(f32::NEG_INFINITY, f32::max);
-    let top = chars.iter().map(|c| c.top).fold(f32::INFINITY, f32::min);
-    let bottom = chars
-        .iter()
-        .map(|c| c.bottom)
-        .fold(f32::NEG_INFINITY, f32::max);
+fn build_word(chars: &[Indexed<'_>]) -> Option<Word> {
+    if chars.is_empty() {
+        return None;
+    }
+    let text: String = chars.iter().map(|(_, c)| c.text.as_str()).collect();
+    // A word made only of non-finite coordinates keeps NaN rather than being
+    // laundered into ±infinity, which would then saturate the layout grid.
+    let x0 = min_finite(chars.iter().map(|(_, c)| c.x0)).unwrap_or(f32::NAN);
+    let x1 = max_finite(chars.iter().map(|(_, c)| c.x1)).unwrap_or(f32::NAN);
+    let top = min_finite(chars.iter().map(|(_, c)| c.top)).unwrap_or(f32::NAN);
+    let bottom = max_finite(chars.iter().map(|(_, c)| c.bottom)).unwrap_or(f32::NAN);
 
-    let char_range = char_range_for(first, last, working);
+    // The word's chars need not be contiguous in stream order, so the range
+    // spans from the lowest to the highest index they occupy.
+    let lo = chars.iter().map(|(i, _)| *i).min()?;
+    let hi = chars.iter().map(|(i, _)| *i).max()?;
 
     Some(Word {
         text: CompactString::from(text.as_str()),
@@ -128,25 +138,8 @@ fn build_word(chars: &[&Char], working: &[Char]) -> Option<Word> {
         x1,
         top,
         bottom,
-        char_range,
+        char_range: lo..(hi + 1),
     })
-}
-
-/// Map a word's first/last char references back to their indices in the
-/// `working` slice the parser produced.
-///
-/// When the working slice equals the input slice (no ligature expansion)
-/// these indices match the public `chars()` output 1:1.
-fn char_range_for(first: &Char, last: &Char, working: &[Char]) -> std::ops::Range<usize> {
-    let first_idx = working
-        .iter()
-        .position(|c| std::ptr::eq(c, first))
-        .unwrap_or(0);
-    let last_idx = working
-        .iter()
-        .rposition(|c| std::ptr::eq(c, last))
-        .unwrap_or(first_idx);
-    first_idx..(last_idx + 1)
 }
 
 fn expand_char(c: &Char) -> Char {
@@ -214,10 +207,16 @@ pub fn extract_text_layout(chars: &[Char], opts: &TextOptions) -> String {
         return String::new();
     }
 
+    // A density of zero (or a negative or non-finite one) would divide by
+    // zero, saturate the grid position to i32::MAX and try to allocate
+    // gigabytes of padding. Fall back to the pdfplumber defaults instead.
+    let x_density = sane_density(opts.x_density, DEFAULT_X_DENSITY, "x_density");
+    let y_density = sane_density(opts.y_density, DEFAULT_Y_DENSITY, "y_density");
+
     // Bounding box origin: smallest x0 and smallest top across all chars
     // (matches pdfplumber's default layout_bbox = page bbox of chars).
-    let x_origin = chars.iter().map(|c| c.x0).fold(f32::INFINITY, f32::min);
-    let y_origin = chars.iter().map(|c| c.top).fold(f32::INFINITY, f32::min);
+    let x_origin = min_finite(chars.iter().map(|c| c.x0)).unwrap_or(0.0);
+    let y_origin = min_finite(chars.iter().map(|c| c.top)).unwrap_or(0.0);
 
     // Group words back into lines using y_tolerance, preserving the
     // top-to-bottom order produced by extract_words.
@@ -236,8 +235,8 @@ pub fn extract_text_layout(chars: &[Char], opts: &TextOptions) -> String {
     let mut newlines_so_far: i32 = 0;
 
     for (i, line) in lines.iter().enumerate() {
-        let y_dist = (line[0].top - y_origin) / opts.y_density;
-        let target_row = y_dist.round() as i32;
+        let y_dist = (line[0].top - y_origin) / y_density;
+        let target_row = grid_position(y_dist, MAX_GRID_ROWS);
         let minimum = if i > 0 { 1 } else { 0 };
         let needed_newlines = (target_row - newlines_so_far).max(minimum);
         out.extend(std::iter::repeat_n('\n', needed_newlines as usize));
@@ -245,8 +244,8 @@ pub fn extract_text_layout(chars: &[Char], opts: &TextOptions) -> String {
 
         let mut col: i32 = 0;
         for (j, w) in line.iter().enumerate() {
-            let x_dist = (w.x0 - x_origin) / opts.x_density;
-            let target_col = x_dist.round() as i32;
+            let x_dist = (w.x0 - x_origin) / x_density;
+            let target_col = grid_position(x_dist, MAX_GRID_COLUMNS);
             let minimum = if j > 0 { 1 } else { 0 };
             let needed_spaces = (target_col - col).max(minimum);
             out.extend(std::iter::repeat_n(' ', needed_spaces as usize));
@@ -257,6 +256,63 @@ pub fn extract_text_layout(chars: &[Char], opts: &TextOptions) -> String {
         }
     }
     out
+}
+
+/// Widest virtual grid we will pad out to, in columns.
+///
+/// A US Letter page is about 84 columns at the default density, so this is
+/// two orders of magnitude of headroom for legitimate documents. Its real
+/// job is to stop a single glyph claiming `x0 = 1e8` from turning a two-char
+/// page into tens of megabytes of spaces.
+const MAX_GRID_COLUMNS: i32 = 20_000;
+
+/// Tallest virtual grid we will pad out to, in rows. Same reasoning as
+/// [`MAX_GRID_COLUMNS`]: a Letter page is about 61 rows by default.
+const MAX_GRID_ROWS: i32 = 20_000;
+
+const DEFAULT_X_DENSITY: f32 = 7.25;
+const DEFAULT_Y_DENSITY: f32 = 13.0;
+
+/// Convert a distance in grid units into a clamped, non-negative index.
+///
+/// `as i32` already saturates on infinity and yields 0 on NaN, but the raw
+/// value can still be astronomically large, so it is clamped to `max`.
+fn grid_position(distance: f32, max: i32) -> i32 {
+    if distance.is_nan() {
+        return 0;
+    }
+    (distance.round() as i32).clamp(0, max)
+}
+
+/// Replace a density that cannot produce a usable grid with `fallback`.
+fn sane_density(value: f32, fallback: f32, name: &str) -> f32 {
+    if value.is_finite() && value > 0.0 {
+        return value;
+    }
+    log::warn!("{name} = {value} is not a usable grid density; falling back to {fallback}");
+    fallback
+}
+
+/// Smallest finite value in `values`, or `None` if there is no finite one.
+///
+/// `f32::min` returns the non-NaN operand, so folding from `f32::INFINITY`
+/// silently turns an all-NaN input into `+inf` — which then saturates the
+/// layout grid. This keeps non-finite values out instead of laundering them.
+fn min_finite(values: impl Iterator<Item = f32>) -> Option<f32> {
+    values
+        .filter(|v| v.is_finite())
+        .fold(None, |acc: Option<f32>, v| {
+            Some(acc.map_or(v, |a| a.min(v)))
+        })
+}
+
+/// Largest finite value in `values`, or `None` if there is no finite one.
+fn max_finite(values: impl Iterator<Item = f32>) -> Option<f32> {
+    values
+        .filter(|v| v.is_finite())
+        .fold(None, |acc: Option<f32>, v| {
+            Some(acc.map_or(v, |a| a.max(v)))
+        })
 }
 
 fn same_line(a: &Word, b: &Word, y_tol: f32) -> bool {

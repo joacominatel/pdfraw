@@ -13,12 +13,18 @@ with the spatial relationships intact, this crate does that.
 
 ## Status
 
-v0.1. The crate works and has 58 tests covering the parser, the layout
-algorithm, font decoding, and end-to-end extraction on synthetic PDFs.
-On a corpus of 40 real invoices (~1.5 MB total) it pulls 99% of the
-content pdfplumber finds, about 21 times faster. I would not call the
-API frozen yet — expect breaking changes between 0.1.x releases until
-0.2 lands.
+v0.1.1. The crate works and its test suite covers the parser, the
+layout algorithm, font decoding, malformed-input handling, and
+end-to-end extraction on synthetic PDFs. On a corpus of 40 real
+invoices (~1.5 MB total) it pulls 99% of the content pdfplumber finds,
+about 21 times faster.
+
+0.1.1 is an audit release: seven defects fixed, including two that
+changed the values of public `Char` fields (`size` and `doctop`) and
+one that let a malformed PDF hang the parser. If you read either field,
+read [`CHANGELOG.md`](CHANGELOG.md) before upgrading. I would not call
+the API frozen yet — expect breaking changes between 0.1.x releases
+until 0.2 lands.
 
 ## When to use it
 
@@ -48,6 +54,19 @@ pdfraw = { git = "https://github.com/joacominatel/pdfraw" }
 ```
 
 The crate is not on crates.io yet.
+
+## The command-line tool
+
+The same crate ships a `pdfraw` binary. Library users never pay for it —
+Cargo does not build a dependency's binaries.
+
+```sh
+pdfraw invoice.pdf                # text to stdout
+pdfraw invoice.pdf -o out.txt     # text to a file
+```
+
+Pages with no text layer are skipped and reported on stderr with their
+index, so a scanned page never silently vanishes from the output.
 
 ## A small example
 

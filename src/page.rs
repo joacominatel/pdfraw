@@ -3,6 +3,7 @@
 use crate::char::Char;
 use crate::document::Document;
 use crate::error::Result;
+use crate::geom::Matrix;
 use crate::text::options::TextOptions;
 use crate::word::{Word, WordOptions};
 use std::sync::OnceLock;
@@ -16,14 +17,59 @@ pub struct Page<'doc> {
 }
 
 /// Geometric metadata about a page.
+///
+/// The media box is stored as the file declares it; `/Rotate` is applied on
+/// the way out, so [`Self::display_width`] and [`Self::display_height`] are
+/// the dimensions a reader would show.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct PageMetrics {
-    /// Width in points.
-    pub width: f32,
-    /// Height in points.
-    pub height: f32,
-    /// Rotation in degrees (0/90/180/270).
+    /// `/MediaBox` width in points, before `/Rotate`.
+    pub media_width: f32,
+    /// `/MediaBox` height in points, before `/Rotate`.
+    pub media_height: f32,
+    /// Rotation in degrees, normalized to `0`, `90`, `180`, or `270`.
     pub rotation: i16,
+}
+
+impl PageMetrics {
+    /// `true` when `/Rotate` swaps the page's width and height.
+    fn is_quarter_turn(&self) -> bool {
+        self.rotation == 90 || self.rotation == 270
+    }
+
+    /// Width as displayed, after `/Rotate`.
+    pub(crate) fn display_width(&self) -> f32 {
+        if self.is_quarter_turn() {
+            self.media_height
+        } else {
+            self.media_width
+        }
+    }
+
+    /// Height as displayed, after `/Rotate`.
+    pub(crate) fn display_height(&self) -> f32 {
+        if self.is_quarter_turn() {
+            self.media_width
+        } else {
+            self.media_height
+        }
+    }
+
+    /// Transform from unrotated PDF user space into displayed page space,
+    /// both still bottom-up. Composing this after the CTM is what makes
+    /// `/Rotate` apply to glyph positions, not just to the page dimensions.
+    ///
+    /// `/Rotate` turns the page clockwise, so for 90° the bottom-left corner
+    /// of the media box ends up at the top-left of what the reader shows.
+    pub(crate) fn rotation_matrix(&self) -> Matrix {
+        let (w, h) = (self.media_width, self.media_height);
+        match self.rotation {
+            90 => Matrix::new(0.0, -1.0, 1.0, 0.0, 0.0, w),
+            180 => Matrix::new(-1.0, 0.0, 0.0, -1.0, w, h),
+            270 => Matrix::new(0.0, 1.0, -1.0, 0.0, h, 0.0),
+            _ => Matrix::IDENTITY,
+        }
+    }
 }
 
 impl<'doc> Page<'doc> {
@@ -51,28 +97,38 @@ impl<'doc> Page<'doc> {
         self.doc.page_ids[self.index]
     }
 
-    fn metrics(&self) -> &PageMetrics {
+    pub(crate) fn metrics(&self) -> &PageMetrics {
         self.metrics_cache.get_or_init(|| {
             crate::parser::lopdf_backend::page_metrics(&self.doc.inner, self.page_id(), self.index)
                 .unwrap_or(PageMetrics {
-                    width: 612.0,
-                    height: 792.0,
+                    media_width: 612.0,
+                    media_height: 792.0,
                     rotation: 0,
                 })
         })
     }
 
-    /// Page width in points.
+    /// Page width in points, as displayed.
+    ///
+    /// A page with `/Rotate 90` or `/Rotate 270` reports its media box
+    /// height here, because that is the edge a reader shows horizontally.
     pub fn width(&self) -> f32 {
-        self.metrics().width
+        self.metrics().display_width()
     }
 
-    /// Page height in points.
+    /// Page height in points, as displayed. See [`Self::width`].
     pub fn height(&self) -> f32 {
-        self.metrics().height
+        self.metrics().display_height()
     }
 
-    /// Page rotation in degrees (`0`, `90`, `180`, `270`).
+    /// Page rotation in degrees, always one of `0`, `90`, `180`, `270`.
+    ///
+    /// The value is normalized: a negative `/Rotate` wraps into range, and a
+    /// `/Rotate` that is not a multiple of 90 is reported as `0`.
+    ///
+    /// Rotation is already applied to [`Self::width`], [`Self::height`] and
+    /// to every [`Char`] coordinate, so callers do not need to apply it
+    /// themselves — this is here to describe the source page.
     pub fn rotation(&self) -> i16 {
         self.metrics().rotation
     }
@@ -141,8 +197,13 @@ impl<'doc> Page<'doc> {
         Ok(crate::text::extractor::extract_text_layout(chars, opts))
     }
 
-    /// Return `Ok(true)` if the page has no text operators but contains an
-    /// image XObject covering more than half of its area.
+    /// Return `Ok(true)` when the page emits no text-showing operators but
+    /// does draw image-like content (any `Do` XObject invocation or an
+    /// inline `BI` image) — i.e. OCR is probably what you want.
+    ///
+    /// A page that draws nothing at all returns `false`. See
+    /// `docs/decisions/0008-widened-scan-detection.md` for why the check
+    /// does not descend into the XObject to confirm `/Subtype /Image`.
     pub fn is_scanned(&self) -> Result<bool> {
         crate::parser::scan_detect::is_scanned(self)
     }

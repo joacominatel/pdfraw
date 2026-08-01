@@ -7,6 +7,18 @@ tags: [roadmap, planning]
 Prioritized view of what's missing. Each item may deserve an ADR before
 being implemented — see conventions in [[decisions/index]].
 
+## ✅ v0.1.1 (audit pass — done)
+
+- [x] `Char.size` reports the real font size, not the matrix scale
+- [x] `Char.doctop` accumulates preceding page heights
+- [x] `q`/`Q` save and restore the text state (PDF 32000-1 Table 52)
+- [x] Cyclic `/Parent` chains no longer hang the parser
+- [x] Malformed `/W` CID ranges no longer exhaust memory
+- [x] A bad glyph name no longer discards a whole `/Differences` map
+- [x] `Word.char_range` is correct when glyphs arrive out of reading order
+- [x] Dependencies current (`lopdf` 0.44, `compact_str` 0.10)
+- [x] rustdoc builds with zero warnings
+
 ## ✅ v0.1 (MVP — done)
 
 - [x] Document open + from_bytes
@@ -19,7 +31,8 @@ being implemented — see conventions in [[decisions/index]].
 - [x] Adobe Glyph List subset
 - [x] is_scanned() detection
 - [x] Encrypted-PDF rejection (Error::Unsupported)
-- [x] Tests: 54 (34 unit + 15 integration + 5 doctest)
+- [x] Tests: unit, integration, snapshot and doctest suites (run
+      `cargo test --all-features` for the current count)
 - [x] Documentation: full Obsidian vault
 
 ## 🚧 v0.2 (next)

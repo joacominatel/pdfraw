@@ -6,8 +6,8 @@
 //!
 //! The PDF spec stores coordinates **bottom-up** (origin at the bottom-left).
 //! Throughout this crate, *after* extraction we expose top-down coordinates
-//! (origin at the top-left) — see [`Matrix::y_flip`] and the per-page
-//! transform applied in the parser.
+//! (origin at the top-left); the flip is applied per page by the parser,
+//! which subtracts each transformed y from the page height.
 
 /// A 2D point in PDF user space.
 #[derive(Debug, Clone, Copy, PartialEq)]

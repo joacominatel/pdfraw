@@ -3,6 +3,7 @@
 use crate::error::{Error, Result};
 use crate::page::Page;
 use std::path::Path;
+use std::sync::OnceLock;
 
 /// An opened PDF document.
 ///
@@ -11,6 +12,9 @@ use std::path::Path;
 pub struct Document {
     pub(crate) inner: lopdf::Document,
     pub(crate) page_ids: Vec<lopdf::ObjectId>,
+    /// Prefix sums of page heights, computed once on first use. Entry `i` is
+    /// the total height of pages `0..i`, i.e. the `doctop` origin of page `i`.
+    doctop_offsets: OnceLock<Vec<f32>>,
 }
 
 impl Document {
@@ -62,7 +66,33 @@ impl Document {
             ));
         }
         let page_ids: Vec<_> = inner.get_pages().into_values().collect();
-        Ok(Self { inner, page_ids })
+        Ok(Self {
+            inner,
+            page_ids,
+            doctop_offsets: OnceLock::new(),
+        })
+    }
+
+    /// Distance from the top of the document to the top of page `index`.
+    ///
+    /// This is what turns a page-local `top` into [`Char::doctop`]. The
+    /// prefix sums are computed once for the whole document and reused.
+    ///
+    /// [`Char::doctop`]: crate::Char::doctop
+    pub(crate) fn doctop_offset(&self, index: usize) -> f32 {
+        let offsets = self.doctop_offsets.get_or_init(|| {
+            let mut sums = Vec::with_capacity(self.page_ids.len());
+            let mut running = 0.0;
+            for i in 0..self.page_ids.len() {
+                sums.push(running);
+                running +=
+                    crate::parser::lopdf_backend::page_metrics(&self.inner, self.page_ids[i], i)
+                        .map(|m| m.display_height())
+                        .unwrap_or(792.0);
+            }
+            sums
+        });
+        offsets.get(index).copied().unwrap_or(0.0)
     }
 
     /// Total number of pages in this document.

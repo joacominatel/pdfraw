@@ -1,5 +1,11 @@
 /target
 
+# macOS
+.DS_Store
+
+# Local corpus for manual testing — third-party documents, not ours to ship.
+/pdf/
+
 # Claude Code tooling
 /.agents/
 /skills-lock.json
