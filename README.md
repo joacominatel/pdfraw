@@ -13,18 +13,25 @@ with the spatial relationships intact, this crate does that.
 
 ## Status
 
-v0.1.1. The crate works and its test suite covers the parser, the
+v0.1.3. The crate works and its test suite covers the parser, the
 layout algorithm, font decoding, malformed-input handling, and
 end-to-end extraction on synthetic PDFs. On a corpus of 40 real
 invoices (~1.5 MB total) it pulls 99% of the content pdfplumber finds,
 about 21 times faster.
 
-0.1.1 is an audit release: seven defects fixed, including two that
-changed the values of public `Char` fields (`size` and `doctop`) and
-one that let a malformed PDF hang the parser. If you read either field,
-read [`CHANGELOG.md`](CHANGELOG.md) before upgrading. I would not call
-the API frozen yet — expect breaking changes between 0.1.x releases
-until 0.2 lands.
+0.1.1 through 0.1.3 were an audit pass. An adversarial test suite —
+written to break the library rather than confirm it works — found 28
+defects. All 28 are fixed. There is no known-defect backlog:
+`rg '#\[ignore = "BUG' tests/` returns nothing.
+
+Several of those fixes **changed the values `Char` reports** in cases
+where it was previously wrong: rotated pages, media boxes that do not
+start at `(0, 0)`, `Tz` scaling, and fonts with undefined or
+one-to-many codes. If you depend on exact coordinates, read
+[`CHANGELOG.md`](CHANGELOG.md) before upgrading.
+
+I would not call the API frozen yet — expect breaking changes between
+0.1.x releases until 0.2 lands.
 
 ## When to use it
 
