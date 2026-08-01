@@ -6,6 +6,10 @@ updates:
   # `# vX.Y.Z` comment beside each SHA to know what the pin represents.
   - package-ecosystem: github-actions
     directory: /
+    # Without this, Dependabot opens against the default branch — master —
+    # which would put commits there that dev never saw. Work reaches master
+    # through a release PR, not around one.
+    target-branch: dev
     schedule:
       interval: monthly
     commit-message:
@@ -13,6 +17,7 @@ updates:
 
   - package-ecosystem: cargo
     directory: /
+    target-branch: dev
     schedule:
       interval: monthly
     commit-message:
@@ -21,3 +26,9 @@ updates:
     # is exactly how 0.1.1 shipped a false MSRV. The msrv job in CI is what
     # catches it, so these must not be auto-merged without a green run.
     open-pull-requests-limit: 5
+    groups:
+      # Patch bumps land as one pull request rather than five that each edit
+      # Cargo.lock and make the others stale the moment one merges.
+      patch-updates:
+        update-types:
+          - patch
