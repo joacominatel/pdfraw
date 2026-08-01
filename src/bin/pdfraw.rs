@@ -3,6 +3,7 @@
 //! ```text
 //! pdfraw <file.pdf>             write the text to stdout
 //! pdfraw <file.pdf> -o out.txt  write the text to a file
+//! pdfraw --version              print the version and exit
 //! ```
 //!
 //! Pages that carry no text layer are skipped with a note on stderr, so a
@@ -16,6 +17,7 @@ use std::process::ExitCode;
 
 const USAGE: &str = "\
 usage: pdfraw <file.pdf> [-o <output.txt>]
+       pdfraw --version
 
 Extracts layout-preserving text from a PDF. Writes to stdout unless -o is
 given. Pages with no text layer are skipped and reported on stderr.";
@@ -23,8 +25,8 @@ given. Pages with no text layer are skipped and reported on stderr.";
 fn main() -> ExitCode {
     match run() {
         Ok(()) => ExitCode::SUCCESS,
-        // Asking for help is not a failure: it prints to stdout and exits 0.
-        Err(e) if e.is_help => {
+        // Asking for help or the version is not a failure.
+        Err(e) if e.is_request => {
             println!("{}", e.message);
             ExitCode::SUCCESS
         }
@@ -36,16 +38,21 @@ fn main() -> ExitCode {
 }
 
 /// A message for the user, and whether it was asked for.
+///
+/// `--help` and `--version` are not failures: they print to stdout and exit
+/// 0. Threading them back through the error path keeps argument handling in
+/// one place, at the cost of this flag.
 struct Failure {
     message: String,
-    is_help: bool,
+    /// The user asked for this output, so it is a success.
+    is_request: bool,
 }
 
 impl<T: Into<String>> From<T> for Failure {
     fn from(message: T) -> Self {
         Self {
             message: message.into(),
-            is_help: false,
+            is_request: false,
         }
     }
 }
@@ -66,7 +73,17 @@ fn parse_args() -> Result<Args, Failure> {
             "-h" | "--help" => {
                 return Err(Failure {
                     message: USAGE.to_string(),
-                    is_help: true,
+                    is_request: true,
+                });
+            }
+            // Read from the manifest, so the binary cannot claim a version
+            // it was not built from. A stale install is otherwise invisible:
+            // 0.1.0 wrote `<input>.txt` beside the input and said nothing
+            // about which build produced it.
+            "-V" | "--version" => {
+                return Err(Failure {
+                    message: format!("pdfraw {}", env!("CARGO_PKG_VERSION")),
+                    is_request: true,
                 });
             }
             "-o" | "--output" => {

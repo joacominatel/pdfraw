@@ -107,6 +107,14 @@ against this release.
 
 ### Added
 
+- **`pdfraw --version`** (and `-V`), printed to stdout with exit 0 like
+  `--help`. The string comes from `CARGO_PKG_VERSION`, so the binary cannot
+  claim a version it was not built from.
+
+  Without it a stale install is invisible: a binary built from a local
+  checkout at 0.1.0 writes `<input>.txt` beside its input rather than to
+  stdout, and nothing in its output says which build produced it.
+
 - **CI.** Seven jobs on every pull request and on the long-lived branches:
   rustfmt, clippy with `-D warnings`, tests in debug *and* release, a build
   pinned to the declared MSRV, rustdoc with `-D warnings`, and a check that
