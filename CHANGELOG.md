@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 While the crate is pre-1.0, behavioural changes may land in patch releases;
 see the Status section of the README.
 
+## [0.1.2] - 2026-07-31
+
+### Fixed
+
+- **The declared minimum Rust version was wrong.** 0.1.1 shipped
+  `rust-version = "1.85"`, but the `lopdf` 0.40 → 0.44 upgrade in that same
+  release pulled in a dependency tree that cannot build below **1.88**:
+  `lopdf` 0.44 declares `rust-version = "1.88"` itself and requires
+  `weezl ^0.2`, which exists only at that floor. On Rust 1.85, 1.86 or 1.87
+  the crate resolved as compatible and then failed to compile. The declared
+  floor now matches reality.
+
+  1.88+ toolchains were never affected.
+
+### Changed
+
+- Four nested `if let` chains collapsed into let-chains, which the corrected
+  1.88 floor makes available. Behaviour is identical; this keeps `clippy`
+  at zero warnings under the real minimum.
+
 ## [0.1.1] - 2026-07-31
 
 ### Security

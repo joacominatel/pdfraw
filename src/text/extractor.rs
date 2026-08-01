@@ -72,13 +72,13 @@ pub fn extract_words(chars: &[Char], opts: &WordOptions) -> Vec<Word> {
 
         let mut current: Vec<Indexed<'_>> = Vec::new();
         for (idx, c) in line {
-            if let Some((_, prev)) = current.last() {
-                if char_begins_new_word(prev, c, opts) {
-                    if let Some(w) = build_word(&current) {
-                        out.push(w);
-                    }
-                    current.clear();
+            if let Some((_, prev)) = current.last()
+                && char_begins_new_word(prev, c, opts)
+            {
+                if let Some(w) = build_word(&current) {
+                    out.push(w);
                 }
+                current.clear();
             }
             if !opts.keep_blank_chars && c.text.chars().all(char::is_whitespace) {
                 if let Some(w) = build_word(&current) {
