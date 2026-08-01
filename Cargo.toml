@@ -16,6 +16,9 @@ exclude = [
     ".agents/",
     ".claude/",
     "skills-lock.json",
+    # Local corpus for manual testing. These are third-party documents we
+    # have no right to redistribute, and they dwarf the actual crate.
+    "pdf/",
 ]
 
 [lib]
