@@ -22,6 +22,13 @@ exclude = [
 name = "pdfraw"
 path = "src/lib.rs"
 
+# Declared explicitly rather than auto-discovered, so the CLI is a deliberate
+# target. Library consumers never build it — Cargo does not compile a
+# dependency's binaries.
+[[bin]]
+name = "pdfraw"
+path = "src/bin/pdfraw.rs"
+
 [dependencies]
 lopdf       = { version = "0.44", default-features = false }
 thiserror   = "2"

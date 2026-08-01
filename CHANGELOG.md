@@ -75,7 +75,14 @@ untrusted files by design, so these are the sharpest items in this release.
 
 ### Added
 
+- **A `pdfraw` command-line tool**, shipped from the same crate. Writes
+  layout-preserving text to stdout, or to a file with `-o`, and reports
+  skipped text-less pages on stderr instead of dropping them silently.
+  Library consumers do not build it — Cargo skips a dependency's binaries.
 - `tests/regression_fixes.rs` — one reproduction per defect above.
+- `tests/adversarial_*.rs` — 144 tests written to break the library. The
+  ones that succeed are parked behind `#[ignore = "BUG: ..."]`; grep for
+  that string to read the inventory of known defects.
 - This changelog.
 
 ## [0.1.0]

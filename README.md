@@ -55,6 +55,19 @@ pdfraw = { git = "https://github.com/joacominatel/pdfraw" }
 
 The crate is not on crates.io yet.
 
+## The command-line tool
+
+The same crate ships a `pdfraw` binary. Library users never pay for it —
+Cargo does not build a dependency's binaries.
+
+```sh
+pdfraw invoice.pdf                # text to stdout
+pdfraw invoice.pdf -o out.txt     # text to a file
+```
+
+Pages with no text layer are skipped and reported on stderr with their
+index, so a scanned page never silently vanishes from the output.
+
 ## A small example
 
 ```rust
