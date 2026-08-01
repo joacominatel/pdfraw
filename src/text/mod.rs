@@ -7,6 +7,7 @@
 //! - [`ligatures`] — Unicode ligature expansion.
 
 pub mod cluster;
+pub mod dedupe;
 pub mod extractor;
 pub mod ligatures;
 pub mod options;

@@ -111,6 +111,15 @@ Line B                                                     2.00
 Total                                                      3.00
 ```
 
+Some PDFs fake bold by drawing the same string twice, a fraction of a
+point apart. That is real content — the glyphs are in the file twice — so
+`pdfraw` reports both by default and the layout comes out as
+`SSAALLDDOO`. Ask for them to be collapsed:
+
+```rust
+let opts = TextOptions::builder().dedupe_tolerance(1.0).build();
+```
+
 If you need lower-level access, `page.chars()` gives you every glyph
 with its position, font, and size; `page.words(opts)` clusters those
 glyphs into words; and `Char`/`Word`/`BBox` are public so you can do

@@ -9,6 +9,34 @@ see the Status section of the README.
 
 ## [Unreleased]
 
+### Added
+
+- **`dedupe_chars`**, a port of pdfplumber's filter for double-struck glyphs.
+
+  A generator with no bold cut for its font often fakes one by drawing the
+  same string twice a fraction of a point apart. Both copies really are in
+  the file, so `chars()` is right to report both — but the layout grid then
+  has two glyphs per cell and interleaves them:
+
+  ```text
+  SSAALLDDOO AANNTTEERRIIOORR   11..001122..002200,,4499
+  ```
+
+  Three ways in, none of them on by default, so the glyph stream stays a
+  faithful account of the file unless asked otherwise:
+
+  - `pdfraw::text::dedupe::dedupe_chars(chars, tolerance)` — the filter
+  - `Page::dedupe_chars(tolerance)` — the page's chars, filtered, leaving
+    the `chars()` cache untouched
+  - `TextOptions::dedupe_tolerance` (and the matching builder method),
+    honoured by `extract_text_layout`
+
+  Glyphs are copies when they agree on `text`, `fontname`, `size` and
+  `upright` and sit within `tolerance` on both axes; the survivor is the one
+  earliest in `(doctop, x0)`. Clustering chains, as pdfplumber's does. On a
+  three-page statement this removes 712 glyphs — the same 712 pdfplumber
+  removes — and recovers roughly half the transaction rows.
+
 ### Fixed
 
 - **Synthetic-oblique text was filtered out of the layout.**
