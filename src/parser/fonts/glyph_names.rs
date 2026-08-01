@@ -19,17 +19,21 @@ pub fn lookup(name: &str) -> Option<char> {
 }
 
 fn parse_uni_name(name: &str) -> Option<char> {
-    // Adobe convention: glyphs of the form "uni0041" or "u0041".
-    let hex = if let Some(rest) = name.strip_prefix("uni") {
-        rest
-    } else {
-        name.strip_prefix('u')?
-    };
-    if hex.len() < 4 || !hex.chars().all(|c| c.is_ascii_hexdigit()) {
+    // Adobe convention: "uniXXXX" is always four hex digits and names a BMP
+    // codepoint, while "uXXXX".."uXXXXXX" takes four to six and can reach the
+    // supplementary planes. Truncating the latter to four digits turned
+    // "u1F600" (an emoji) into U+1F60, a completely unrelated character.
+    if let Some(hex) = name.strip_prefix("uni") {
+        if hex.len() != 4 || !hex.chars().all(|c| c.is_ascii_hexdigit()) {
+            return None;
+        }
+        return char::from_u32(u32::from_str_radix(hex, 16).ok()?);
+    }
+    let hex = name.strip_prefix('u')?;
+    if !(4..=6).contains(&hex.len()) || !hex.chars().all(|c| c.is_ascii_hexdigit()) {
         return None;
     }
-    let n = u32::from_str_radix(&hex[..4.min(hex.len())], 16).ok()?;
-    char::from_u32(n)
+    char::from_u32(u32::from_str_radix(hex, 16).ok()?)
 }
 
 #[rustfmt::skip]

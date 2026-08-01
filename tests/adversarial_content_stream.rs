@@ -96,7 +96,6 @@ fn horizontal_scaling_widens_the_reported_glyph_box() {
 }
 
 #[test]
-#[ignore = "BUG: a negative font size produces x1 < x0 and bottom < top, violating the documented Char box invariants"]
 fn negative_font_size_keeps_the_char_box_ordered() {
     let chars = chars_of("BT /F1 -10 Tf 100 700 Td <41> Tj ET");
     assert_eq!(chars.len(), 1);

@@ -176,12 +176,21 @@ impl Matrix {
         (self.c * self.c + self.d * self.d).sqrt()
     }
 
-    /// True when the matrix is axis-aligned and not rotated/flipped beyond
-    /// a tolerance of 0.01 radians.
+    /// True when the matrix is axis-aligned and not rotated, sheared or
+    /// flipped beyond a relative tolerance of 0.01.
+    ///
+    /// A degenerate matrix — one with no meaningful scale, or with a zero
+    /// vertical scale — is never upright: it does not describe a readable
+    /// orientation at all.
     pub fn is_upright(&self) -> bool {
-        // For an upright matrix `a > 0, d != 0` and skew/shear coefficients
-        // (`b`, `c`) are near zero relative to the main diagonal.
-        let scale = self.x_scale().max(self.y_scale()).max(1e-6);
+        // For an upright matrix `a > 0`, `d != 0`, and the skew/shear
+        // coefficients (`b`, `c`) are near zero relative to the main diagonal.
+        let scale = self.x_scale().max(self.y_scale());
+        // Clamping the divisor to a floor here would make *any* matrix
+        // smaller than the floor pass the shear test, rotated or not.
+        if !scale.is_finite() || scale <= 1e-6 || self.d == 0.0 {
+            return false;
+        }
         self.b.abs() / scale < 0.01 && self.c.abs() / scale < 0.01 && self.a > 0.0
     }
 }
