@@ -331,3 +331,32 @@ fn bbox_merge_keeps_finite_bounds_when_one_box_is_nan() {
         "merge produced {merged:?}"
     );
 }
+
+#[test]
+fn is_upright_accepts_a_synthetic_oblique_matrix() {
+    // Fake italic: the glyphs slant, but `b == 0` keeps the baseline flat, so
+    // the text reads along a horizontal line like any other. These are the
+    // real numbers from an ICBC statement.
+    let m = Matrix::new(7.8, 0.0, 1.658, 7.8, 0.0, 0.0);
+    assert!(
+        m.is_upright(),
+        "a sheared but horizontally-set matrix must stay in the layout"
+    );
+}
+
+#[test]
+fn is_upright_rejects_a_tilted_baseline() {
+    // Same magnitude of distortion as the oblique case, but in `b` — which is
+    // what tips the writing direction off the horizontal.
+    let m = Matrix::new(7.8, 1.658, 0.0, 7.8, 0.0, 0.0);
+    assert!(
+        !m.is_upright(),
+        "a tilted baseline is not a horizontal line of text"
+    );
+}
+
+#[test]
+fn is_upright_rejects_a_quarter_turn_however_sheared() {
+    let m = Matrix::new(0.0, 7.8, -7.8, 1.658, 0.0, 0.0);
+    assert!(!m.is_upright(), "90°-rotated matrix reported as upright");
+}
