@@ -1,4 +1,4 @@
-//! Word clustering: groups of adjacent [`Char`]s on the same line.
+//! Word clustering: groups of adjacent [`Char`](crate::Char)s on the same line.
 
 use compact_str::CompactString;
 
@@ -15,12 +15,16 @@ pub struct Word {
     pub top: f32,
     /// Bottom edge.
     pub bottom: f32,
-    /// Inclusive index range into the page's char vector that produced this
-    /// word, useful for mapping output back to source glyphs.
+    /// Half-open index range into the page's char slice spanning this word's
+    /// source glyphs, useful for mapping output back to them.
+    ///
+    /// The glyphs need not be contiguous: a content stream may emit them out
+    /// of reading order, in which case the range also covers whatever sits
+    /// between the word's lowest and highest index.
     pub char_range: std::ops::Range<usize>,
 }
 
-/// Options that control how [`crate::text::extractor::WordExtractor`]
+/// Options that control how [`crate::text::extractor::extract_words`]
 /// clusters chars into words.
 #[derive(Debug, Clone)]
 pub struct WordOptions {

@@ -33,10 +33,14 @@ pub fn extract(doc: &LDoc, font_dict: &Dictionary) -> Option<Differences> {
         match item {
             Object::Integer(i) => code = *i,
             Object::Name(name) => {
-                let s = std::str::from_utf8(name).ok()?;
-                if let Some(c) = glyph_names::lookup(s) {
-                    if (0..=255).contains(&code) {
-                        out.insert(code as u8, c);
+                // A name we cannot read is skipped, not fatal: aborting here
+                // would throw away every override already collected. The code
+                // still advances, because the position is consumed either way.
+                if let Ok(s) = std::str::from_utf8(name) {
+                    if let Some(c) = glyph_names::lookup(s) {
+                        if (0..=255).contains(&code) {
+                            out.insert(code as u8, c);
+                        }
                     }
                 }
                 code += 1;
@@ -90,5 +94,36 @@ mod tests {
         let doc = lopdf::Document::new();
         let font = Dictionary::new();
         assert!(extract(&doc, &font).is_none());
+    }
+
+    #[test]
+    fn non_utf8_glyph_name_does_not_discard_the_other_overrides() {
+        // A single unreadable name must be skipped, not abort the whole
+        // parse: everything before and after it stays mapped.
+        let doc = lopdf::Document::new();
+        let font = diffs_dict(vec![
+            Object::Integer(65),
+            Object::Name(b"bullet".to_vec()),
+            Object::Name(vec![0xFF, 0xFE]), // not valid UTF-8
+            Object::Integer(169),
+            Object::Name(b"copyright".to_vec()),
+        ]);
+        let d = extract(&doc, &font).expect("valid entries must survive a bad name");
+        assert_eq!(d.get(&65), Some(&'\u{2022}'));
+        assert_eq!(d.get(&169), Some(&'©'));
+    }
+
+    #[test]
+    fn unknown_glyph_name_still_advances_the_implicit_code() {
+        // A name absent from the glyph list produces no mapping, but the
+        // running code must still increment so later names land correctly.
+        let doc = lopdf::Document::new();
+        let font = diffs_dict(vec![
+            Object::Integer(65),
+            Object::Name(b"notarealglyphname".to_vec()),
+            Object::Name(b"exclam".to_vec()),
+        ]);
+        let d = extract(&doc, &font).unwrap();
+        assert_eq!(d.get(&66), Some(&'!'));
     }
 }

@@ -1,6 +1,6 @@
 [package]
 name = "pdfraw"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 rust-version = "1.85"
 license = "MIT"
@@ -23,9 +23,9 @@ name = "pdfraw"
 path = "src/lib.rs"
 
 [dependencies]
-lopdf       = { version = "0.40", default-features = false }
+lopdf       = { version = "0.44", default-features = false }
 thiserror   = "2"
-compact_str = "0.9"
+compact_str = "0.10"
 encoding_rs = "0.8"
 log         = "0.4"
 

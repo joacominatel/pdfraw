@@ -1,8 +1,12 @@
 //! Output-to-source character mapping.
 //!
-//! [`TextMap`] is the structured output of [`crate::text::extractor::extract_text_layout`]:
-//! a sequence of `(output_char, Option<&Char>)` cells where `None` marks an
-//! inserted space or newline.
+//! [`TextMap`] is a sequence of `(output_char, Option<&Char>)` cells where
+//! `None` marks a space or newline inserted by layout reconstruction.
+//!
+//! **Not produced by anything yet.** It is the intended structured return
+//! type of a future `extract_text_layout_mapped`; today
+//! [`extract_text_layout`](crate::text::extractor::extract_text_layout)
+//! returns a plain `String`. See `docs/roadmap.md`.
 
 use crate::char::Char;
 

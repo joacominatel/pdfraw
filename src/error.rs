@@ -1,6 +1,6 @@
 //! Library error type and result alias.
 //!
-//! [`Error`] is `#[non_exhaustive]` so future variants can be added without
+//! [`enum@Error`] is `#[non_exhaustive]` so future variants can be added without
 //! a breaking change. Match against it with a wildcard arm.
 
 use thiserror::Error;

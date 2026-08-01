@@ -3,6 +3,10 @@
 //! Builds small synthetic PDFs with `printpdf` so tests don't depend on
 //! committed binaries.
 
+// Each integration test compiles its own copy of this module, so a helper
+// only one of them needs would otherwise warn in all the others.
+#![allow(dead_code)]
+
 use printpdf::{BuiltinFont, Mm, PdfDocument};
 
 /// Build a minimal one-page PDF with the given lines of text rendered at
