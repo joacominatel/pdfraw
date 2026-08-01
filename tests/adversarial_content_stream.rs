@@ -79,7 +79,6 @@ fn cm_with_too_few_operands_is_ignored() {
 // ---------------------------------------------------------------------------
 
 #[test]
-#[ignore = "BUG: horizontal scaling (Tz) is applied to the glyph advance but not to the text rendering matrix, so reported glyph widths ignore Tz"]
 fn horizontal_scaling_widens_the_reported_glyph_box() {
     let scaled = chars_of("BT /F1 10 Tf 200 Tz 100 700 Td <4142> Tj ET");
     assert_eq!(scaled.len(), 2);
@@ -96,7 +95,6 @@ fn horizontal_scaling_widens_the_reported_glyph_box() {
 }
 
 #[test]
-#[ignore = "BUG: a negative font size produces x1 < x0 and bottom < top, violating the documented Char box invariants"]
 fn negative_font_size_keeps_the_char_box_ordered() {
     let chars = chars_of("BT /F1 -10 Tf 100 700 Td <41> Tj ET");
     assert_eq!(chars.len(), 1);
@@ -154,7 +152,6 @@ fn tf_naming_a_font_absent_from_resources_still_emits_text() {
 }
 
 #[test]
-#[ignore = "BUG: word spacing is keyed on the decoded character instead of on byte code 32, so Tw is skipped when /Differences remaps code 32 (PDF 32000-1 §9.3.3)"]
 fn word_spacing_applies_to_byte_code_32_even_when_remapped() {
     let mut widths = vec![1000_i64; 34]; // codes 32..=65
     widths[0] = 1000;

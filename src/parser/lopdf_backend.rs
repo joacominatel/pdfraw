@@ -25,7 +25,7 @@ pub(crate) fn page_metrics(
             page: page_index,
             reason: "missing /MediaBox".into(),
         })?;
-    let (media_width, media_height) = media_box_dimensions(page_index, &media_box)?;
+    let media = media_box_dimensions(doc, page_index, &media_box)?;
     let rotation = resolve_inheritable(doc, page, b"Rotate")
         .and_then(|o| match o {
             Object::Integer(i) => Some(i),
@@ -35,8 +35,10 @@ pub(crate) fn page_metrics(
         .map(normalize_rotation)
         .unwrap_or(0);
     Ok(PageMetrics {
-        media_width,
-        media_height,
+        media_width: media.width,
+        media_height: media.height,
+        origin_x: media.origin_x,
+        origin_y: media.origin_y,
         rotation,
     })
 }
@@ -95,7 +97,7 @@ fn deref(doc: &LDoc, obj: Object) -> Object {
     }
 }
 
-fn media_box_dimensions(page_index: usize, o: &Object) -> Result<(f32, f32)> {
+fn media_box_dimensions(doc: &LDoc, page_index: usize, o: &Object) -> Result<MediaBox> {
     let arr = match o {
         Object::Array(a) => a,
         _ => {
@@ -111,10 +113,13 @@ fn media_box_dimensions(page_index: usize, o: &Object) -> Result<(f32, f32)> {
             reason: format!("/MediaBox has {} elements, expected 4", arr.len()),
         });
     }
+    // Any of the four may be an indirect reference. Reading them literally
+    // failed the whole lookup, and the caller then silently fell back to a
+    // default page size — so every glyph on the page came out mispositioned.
     let n = |o: &Object| -> Result<f32> {
-        match o {
-            Object::Integer(i) => Ok(*i as f32),
-            Object::Real(r) => Ok(*r),
+        match deref(doc, o.clone()) {
+            Object::Integer(i) => Ok(i as f32),
+            Object::Real(r) => Ok(r),
             _ => Err(Error::ContentStream {
                 page: page_index,
                 reason: "/MediaBox contains a non-numeric value".into(),
@@ -125,7 +130,34 @@ fn media_box_dimensions(page_index: usize, o: &Object) -> Result<(f32, f32)> {
     let y0 = n(&arr[1])?;
     let x1 = n(&arr[2])?;
     let y1 = n(&arr[3])?;
-    Ok(((x1 - x0).abs(), (y1 - y0).abs()))
+    let (width, height) = ((x1 - x0).abs(), (y1 - y0).abs());
+
+    // A degenerate box would give a 0-wide page and negative tops. A *missing*
+    // /MediaBox already falls back to a usable default, so a useless one
+    // should not be treated as more trustworthy than no box at all.
+    if !width.is_finite() || !height.is_finite() || width <= 0.0 || height <= 0.0 {
+        return Err(Error::ContentStream {
+            page: page_index,
+            reason: format!("/MediaBox has no usable area ({width} x {height})"),
+        });
+    }
+    // The lower-left corner is the page's origin, and it is not always
+    // (0, 0). Dropping it shifted every glyph by that corner, which could
+    // even put an on-page glyph at a negative `top`.
+    Ok(MediaBox {
+        origin_x: x0.min(x1),
+        origin_y: y0.min(y1),
+        width,
+        height,
+    })
+}
+
+/// A page's `/MediaBox`, split into where it starts and how big it is.
+struct MediaBox {
+    origin_x: f32,
+    origin_y: f32,
+    width: f32,
+    height: f32,
 }
 
 /// Extract every glyph on the page as a [`Char`].
@@ -137,9 +169,10 @@ pub(crate) fn extract_chars(page: &Page<'_>) -> Result<Vec<Char>> {
         height: metrics.display_height(),
         doctop_offset: page.document().doctop_offset(page.index()),
     };
-    // `/Rotate` is folded in as the outermost transform, so every glyph
-    // position, size and uprightness comes out already in displayed space.
-    let page_rotation = metrics.rotation_matrix();
+    // The media-box origin and `/Rotate` are folded in as the outermost
+    // transform, so every glyph position, size and uprightness comes out
+    // already in displayed space.
+    let page_rotation = metrics.page_transform();
 
     let raw = doc.get_page_content(page_id);
     let content = Content::decode(&raw).map_err(|e| Error::ContentStream {
@@ -486,33 +519,52 @@ struct FontInfo<'doc> {
     differences: Option<crate::parser::fonts::differences::Differences>,
 }
 
+/// One glyph code from a shown string, with the text it decodes to.
+///
+/// The text is a `String`, not a `char`, because a `/ToUnicode` entry may map
+/// one code to several characters (`<0041>` → `"fi"`), and it may be empty
+/// when the encoding defines no glyph for the code.
+struct DecodedCode {
+    code: u32,
+    text: String,
+}
+
 impl FontInfo<'_> {
-    /// Decode one glyph code into the Unicode string it produces. Returns
-    /// `(text, advance_bytes)` so callers can iterate variable-length codes
-    /// in composite fonts.
-    fn decode(&self, bytes: &[u8]) -> String {
-        // If we have a per-code override from /Differences, build the
-        // decoded string ourselves so we can substitute on byte basis. We
-        // only do this for simple fonts (1 byte per code).
-        if let Some(diffs) = &self.differences
-            && !self.is_composite
-        {
-            let mut s = String::with_capacity(bytes.len());
-            let base_decoded = match &self.encoding {
-                Some(enc) => enc.bytes_to_string(bytes).ok(),
-                None => None,
-            };
-            let base_chars: Option<Vec<char>> = base_decoded.as_ref().map(|d| d.chars().collect());
-            for (i, b) in bytes.iter().enumerate() {
-                if let Some(c) = diffs.get(b) {
-                    s.push(*c);
-                } else if let Some(bc) = base_chars.as_ref().and_then(|v| v.get(i)) {
-                    s.push(*bc);
-                } else {
-                    s.push(*b as char);
+    /// Split a shown string into its glyph codes, decoding each one on its own.
+    ///
+    /// Decoding the whole string at once and then zipping the result against
+    /// the code list assumed the two lined up index for index. They do not:
+    /// an encoding that defines no glyph for a code yields a shorter string,
+    /// and a one-to-many `/ToUnicode` entry yields a longer one. Either way
+    /// every following glyph took the wrong code — and so the wrong width and
+    /// the wrong advance. Decoding per code removes the assumption entirely.
+    fn decode_codes(&self, bytes: &[u8]) -> Vec<DecodedCode> {
+        // Composite fonts are read two bytes at a time. This is still an
+        // approximation — a real CMap may define variable-length ranges — but
+        // it is now applied consistently to codes *and* text.
+        let chunk = if self.is_composite { 2 } else { 1 };
+        bytes
+            .chunks(chunk)
+            .map(|c| {
+                let code = c.iter().fold(0u32, |acc, &b| (acc << 8) | b as u32);
+                DecodedCode {
+                    code,
+                    text: self.decode_one(c, code),
                 }
-            }
-            return s;
+            })
+            .collect()
+    }
+
+    /// Decode a single code's bytes into the text it produces.
+    fn decode_one(&self, bytes: &[u8], code: u32) -> String {
+        // A /Differences override wins, but only for simple fonts: the array
+        // is indexed by single byte codes.
+        if !self.is_composite
+            && let Some(diffs) = &self.differences
+            && let Ok(byte) = u8::try_from(code)
+            && let Some(c) = diffs.get(&byte)
+        {
+            return c.to_string();
         }
         match &self.encoding {
             Some(enc) => enc.bytes_to_string(bytes).unwrap_or_else(|_| latin1(bytes)),
@@ -629,36 +681,25 @@ fn emit_string(
     let ts = &gs.text;
     let font = fonts.get(&ts.font_name);
 
-    let decoded: String = font
-        .map(|f| f.decode(bytes))
-        .unwrap_or_else(|| latin1(bytes));
-
     let fontname_str = String::from_utf8_lossy(&ts.font_name).into_owned();
     let fontname = CompactString::from(&fontname_str);
 
     let is_composite = font.is_some_and(|f| f.is_composite);
 
-    // Phase 1 simplification: we map decoded chars to byte positions by
-    // walking bytes one-by-one for simple fonts and 2-by-2 for composite.
-    // This is an approximation; multi-byte CMap ranges may shift things.
-    let codes: Vec<u32> = if is_composite {
-        bytes
-            .chunks(2)
-            .map(|c| match c {
-                [a, b] => ((*a as u32) << 8) | *b as u32,
-                [a] => *a as u32,
-                _ => 0,
+    // One entry per glyph code, each carrying its own decoded text. Codes and
+    // text can no longer drift apart, however the encoding behaves.
+    let decoded: Vec<DecodedCode> = match font {
+        Some(f) => f.decode_codes(bytes),
+        None => bytes
+            .iter()
+            .map(|&b| DecodedCode {
+                code: b as u32,
+                text: (b as char).to_string(),
             })
-            .collect()
-    } else {
-        bytes.iter().map(|&b| b as u32).collect()
+            .collect(),
     };
 
-    // Iterate decoded chars in parallel with codes, using whichever is
-    // shorter (defensive — they should match in length most of the time).
-    for (code_idx, ch) in decoded.chars().enumerate() {
-        let code = codes.get(code_idx).copied().unwrap_or(0);
-
+    for DecodedCode { code, text } in decoded {
         let w = font.map(|f| f.widths.width_of(code)).unwrap_or(0.5);
         let glyph_width = w * ts.font_size;
 
@@ -676,15 +717,35 @@ fn emit_string(
         let top = geom.height - upper.y;
         let bottom = geom.height - origin.y;
 
-        let glyph_render_width = glyph_width * x_scale;
+        // `Tz` scales glyphs horizontally. It lives in the text state rather
+        // than in `tm`, so it has to be applied to the box explicitly — the
+        // advance below already carries it, which is why the two disagreed:
+        // with `200 Tz` advances doubled while reported widths did not move.
+        let glyph_render_width = glyph_width * ts.h_scale * x_scale;
         let x0 = origin.x;
         let x1 = x0 + glyph_render_width;
 
         let upright = trm.is_upright();
 
-        if !ch.is_control() {
+        // A negative font size (or a mirroring matrix) runs the box backwards.
+        // `Char` documents x0 <= x1 and top <= bottom, and `build_word` folds
+        // these with min/max, so hand back an ordered box either way.
+        let (x0, x1) = if x0 <= x1 { (x0, x1) } else { (x1, x0) };
+        let (top, bottom) = if top <= bottom {
+            (top, bottom)
+        } else {
+            (bottom, top)
+        };
+
+        // A code the encoding defines no glyph for still occupies a position
+        // and still advances — it just draws nothing, so no Char is emitted.
+        // A code that decodes to several characters produces one Char holding
+        // them all, which is what `Char::text` already documents, and advances
+        // once rather than once per character.
+        let visible: String = text.chars().filter(|c| !c.is_control()).collect();
+        if !visible.is_empty() {
             out.push(Char {
-                text: CompactString::from(ch.to_string().as_str()),
+                text: CompactString::from(visible.as_str()),
                 x0,
                 x1,
                 top,
@@ -697,11 +758,24 @@ fn emit_string(
         }
 
         // Advance text matrix in *text* space (before ctm).
-        let adv_t = (w * ts.font_size + ts.char_space + word_space_for(ch, ts)) * ts.h_scale;
+        let word_space = word_space_for(code, is_composite, ts);
+        let adv_t = (w * ts.font_size + ts.char_space + word_space) * ts.h_scale;
         tm.advance(adv_t);
     }
 }
 
-fn word_space_for(ch: char, ts: &TextParams) -> f32 {
-    if ch == ' ' { ts.word_space } else { 0.0 }
+/// Word spacing per PDF 32000-1 §9.3.3: it applies to the single-byte code
+/// 32, whatever that byte happens to decode to.
+///
+/// Keying it on the decoded character instead meant a font whose
+/// `/Differences` remaps code 32 to some other glyph never received `Tw` at
+/// all. The mirror case matters too: in a composite font a two-byte CID may
+/// contain `0x20` without being a word space, and must not receive it.
+fn word_space_for(code: u32, is_composite: bool, ts: &TextParams) -> f32 {
+    // Composite fonts only get word spacing for a genuine single-byte 32,
+    // which `codes` never produces from a two-byte CID.
+    if is_composite {
+        return 0.0;
+    }
+    if code == 32 { ts.word_space } else { 0.0 }
 }

@@ -1,6 +1,6 @@
 [package]
 name = "pdfraw"
-version = "0.1.2"
+version = "0.1.3"
 edition = "2024"
 rust-version = "1.88"
 license = "MIT"
@@ -19,6 +19,9 @@ exclude = [
     # Local corpus for manual testing. These are third-party documents we
     # have no right to redistribute, and they dwarf the actual crate.
     "pdf/",
+    # CI configuration is for this repository, not for anyone consuming the
+    # crate from crates.io.
+    ".github/",
 ]
 
 [lib]

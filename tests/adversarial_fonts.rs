@@ -19,7 +19,6 @@ fn chars_with_font(font: Dictionary, content: &str) -> Vec<Char> {
 // ---------------------------------------------------------------------------
 
 #[test]
-#[ignore = "BUG: emit_string assumes decoded.chars() aligns index-for-index with the byte codes; an undefined code is dropped by the encoding table, shifting every following glyph onto the wrong width"]
 fn glyph_width_uses_its_own_code_when_an_undefined_code_precedes_it() {
     // 0xB0 is undefined in StandardEncoding, so the decoder drops it.
     let mut font = simple_font("StandardEncoding", 65, &[1000, 1000]);
@@ -37,7 +36,6 @@ fn glyph_width_uses_its_own_code_when_an_undefined_code_precedes_it() {
 }
 
 #[test]
-#[ignore = "BUG: a one-to-many ToUnicode mapping makes decoded.chars() longer than the code list; the extra chars fall back to code 0 and add a phantom advance"]
 fn one_to_many_cmap_entry_advances_only_once() {
     let mut builder = PdfBuilder::new();
     let to_unicode = builder.add_object(Stream::new(dictionary! {}, cmap_with_ligature()));
@@ -219,7 +217,6 @@ fn font_with_differences(diffs: Vec<Object>) -> Dictionary {
 }
 
 #[test]
-#[ignore = "BUG: glyph_names::parse_uni_name truncates uXXXXX names to 4 hex digits, so every glyph above the BMP decodes to the wrong codepoint"]
 fn differences_with_a_supplementary_plane_uni_name_decodes_fully() {
     let font = font_with_differences(vec![Object::Integer(65), Object::Name(b"u1F600".to_vec())]);
     let chars = chars_with_font(font, "BT /F1 10 Tf 100 700 Td <41> Tj ET");
