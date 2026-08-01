@@ -80,7 +80,13 @@ pub fn extract_words(chars: &[Char], opts: &WordOptions) -> Vec<Word> {
                 }
                 current.clear();
             }
-            if !opts.keep_blank_chars && c.text.chars().all(char::is_whitespace) {
+            // `chars().all(..)` is vacuously true for an empty string, so a
+            // zero-length Char used to read as blank and split the word it
+            // sat inside.
+            if !opts.keep_blank_chars
+                && !c.text.is_empty()
+                && c.text.chars().all(char::is_whitespace)
+            {
                 if let Some(w) = build_word(&current) {
                     out.push(w);
                 }

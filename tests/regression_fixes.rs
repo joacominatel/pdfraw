@@ -387,9 +387,14 @@ fn half_turn_rotation_mirrors_the_glyph_through_the_page_centre() {
         "a half turn does not swap dimensions"
     );
     assert!((c.x0 - 495.0).abs() < 1.0, "x0={} (expected 595-100)", c.x0);
+    // The glyph is upside down, so its baseline lands at 700 and the body
+    // extends *downward* from there. The box still has to be reported in
+    // order — a mirroring transform must not hand back top > bottom.
+    assert!(c.top <= c.bottom, "box is inverted: {c:?}");
+    assert!((c.top - 700.0).abs() < 1.0, "top={} (expected 700)", c.top);
     assert!(
-        (c.bottom - 700.0).abs() < 1.0,
-        "bottom={} (expected 700)",
+        (c.bottom - 710.0).abs() < 1.0,
+        "bottom={} (expected the 10pt band below the baseline)",
         c.bottom
     );
 }

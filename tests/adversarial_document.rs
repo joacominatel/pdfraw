@@ -52,7 +52,6 @@ fn media_box_with_real_values_is_accepted() {
 }
 
 #[test]
-#[ignore = "BUG: media_box_dimensions does not dereference indirect numbers inside the array, so the page silently falls back to 612x792"]
 fn media_box_with_indirect_numbers_is_resolved() {
     let mut builder = PdfBuilder::new().font("F1", simple_font("WinAnsiEncoding", 65, &[1000]));
     let w = builder.add_object(Object::Integer(595));
@@ -75,7 +74,6 @@ fn media_box_with_indirect_numbers_is_resolved() {
 }
 
 #[test]
-#[ignore = "BUG: a zero-area /MediaBox is accepted verbatim, producing a 0x0 page and negative char tops, while a *missing* /MediaBox falls back to 612x792"]
 fn media_box_with_zero_area_falls_back_to_a_usable_page() {
     let doc = page_with_media_box(vec![0.into(), 0.into(), 0.into(), 0.into()]);
     let page = doc.page(0).unwrap();

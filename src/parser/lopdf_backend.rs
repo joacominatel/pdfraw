@@ -25,7 +25,7 @@ pub(crate) fn page_metrics(
             page: page_index,
             reason: "missing /MediaBox".into(),
         })?;
-    let (media_width, media_height) = media_box_dimensions(page_index, &media_box)?;
+    let (media_width, media_height) = media_box_dimensions(doc, page_index, &media_box)?;
     let rotation = resolve_inheritable(doc, page, b"Rotate")
         .and_then(|o| match o {
             Object::Integer(i) => Some(i),
@@ -95,7 +95,7 @@ fn deref(doc: &LDoc, obj: Object) -> Object {
     }
 }
 
-fn media_box_dimensions(page_index: usize, o: &Object) -> Result<(f32, f32)> {
+fn media_box_dimensions(doc: &LDoc, page_index: usize, o: &Object) -> Result<(f32, f32)> {
     let arr = match o {
         Object::Array(a) => a,
         _ => {
@@ -111,10 +111,13 @@ fn media_box_dimensions(page_index: usize, o: &Object) -> Result<(f32, f32)> {
             reason: format!("/MediaBox has {} elements, expected 4", arr.len()),
         });
     }
+    // Any of the four may be an indirect reference. Reading them literally
+    // failed the whole lookup, and the caller then silently fell back to a
+    // default page size — so every glyph on the page came out mispositioned.
     let n = |o: &Object| -> Result<f32> {
-        match o {
-            Object::Integer(i) => Ok(*i as f32),
-            Object::Real(r) => Ok(*r),
+        match deref(doc, o.clone()) {
+            Object::Integer(i) => Ok(i as f32),
+            Object::Real(r) => Ok(r),
             _ => Err(Error::ContentStream {
                 page: page_index,
                 reason: "/MediaBox contains a non-numeric value".into(),
@@ -125,7 +128,18 @@ fn media_box_dimensions(page_index: usize, o: &Object) -> Result<(f32, f32)> {
     let y0 = n(&arr[1])?;
     let x1 = n(&arr[2])?;
     let y1 = n(&arr[3])?;
-    Ok(((x1 - x0).abs(), (y1 - y0).abs()))
+    let (width, height) = ((x1 - x0).abs(), (y1 - y0).abs());
+
+    // A degenerate box would give a 0-wide page and negative tops. A *missing*
+    // /MediaBox already falls back to a usable default, so a useless one
+    // should not be treated as more trustworthy than no box at all.
+    if !width.is_finite() || !height.is_finite() || width <= 0.0 || height <= 0.0 {
+        return Err(Error::ContentStream {
+            page: page_index,
+            reason: format!("/MediaBox has no usable area ({width} x {height})"),
+        });
+    }
+    Ok((width, height))
 }
 
 /// Extract every glyph on the page as a [`Char`].
@@ -681,6 +695,16 @@ fn emit_string(
         let x1 = x0 + glyph_render_width;
 
         let upright = trm.is_upright();
+
+        // A negative font size (or a mirroring matrix) runs the box backwards.
+        // `Char` documents x0 <= x1 and top <= bottom, and `build_word` folds
+        // these with min/max, so hand back an ordered box either way.
+        let (x0, x1) = if x0 <= x1 { (x0, x1) } else { (x1, x0) };
+        let (top, bottom) = if top <= bottom {
+            (top, bottom)
+        } else {
+            (bottom, top)
+        };
 
         if !ch.is_control() {
             out.push(Char {

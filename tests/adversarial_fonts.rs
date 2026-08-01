@@ -219,7 +219,6 @@ fn font_with_differences(diffs: Vec<Object>) -> Dictionary {
 }
 
 #[test]
-#[ignore = "BUG: glyph_names::parse_uni_name truncates uXXXXX names to 4 hex digits, so every glyph above the BMP decodes to the wrong codepoint"]
 fn differences_with_a_supplementary_plane_uni_name_decodes_fully() {
     let font = font_with_differences(vec![Object::Integer(65), Object::Name(b"u1F600".to_vec())]);
     let chars = chars_with_font(font, "BT /F1 10 Tf 100 700 Td <41> Tj ET");

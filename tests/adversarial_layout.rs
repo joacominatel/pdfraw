@@ -198,7 +198,6 @@ fn extract_words_skips_non_upright_glyphs() {
 }
 
 #[test]
-#[ignore = "BUG: an empty-text Char is treated as blank (`chars().all(is_whitespace)` is vacuously true) and splits the surrounding word"]
 fn extract_words_ignores_zero_length_char_between_glyphs() {
     let chars = vec![
         ch("A", 0.0, 10.0, 10.0, 22.0),
@@ -307,7 +306,6 @@ fn extract_text_simple_returns_empty_string_when_all_chars_are_blank() {
 // ---------------------------------------------------------------------------
 
 #[test]
-#[ignore = "BUG: Matrix::is_upright floors the scale at 1e-6, so any matrix smaller than that is reported upright regardless of its rotation"]
 fn is_upright_returns_false_when_a_tiny_matrix_is_rotated() {
     let s = std::f32::consts::FRAC_1_SQRT_2 * 1e-8;
     let m = Matrix::new(s, s, -s, s, 0.0, 0.0);
@@ -315,7 +313,6 @@ fn is_upright_returns_false_when_a_tiny_matrix_is_rotated() {
 }
 
 #[test]
-#[ignore = "BUG: Matrix::is_upright documents `d != 0` but never checks it, so a zero-height (degenerate) matrix is reported upright"]
 fn is_upright_returns_false_when_vertical_scale_is_zero() {
     let m = Matrix::new(1.0, 0.0, 0.0, 0.0, 0.0, 0.0);
     assert!(!m.is_upright(), "degenerate matrix reported as upright");
