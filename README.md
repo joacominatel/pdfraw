@@ -71,6 +71,8 @@ Cargo does not build a dependency's binaries.
 ```sh
 pdfraw invoice.pdf                # text to stdout
 pdfraw invoice.pdf -o out.txt     # text to a file
+pdfraw --version                  # which build is this?
+pdfraw --help
 ```
 
 Pages with no text layer are skipped and reported on stderr with their
