@@ -494,26 +494,25 @@ impl FontInfo<'_> {
         // If we have a per-code override from /Differences, build the
         // decoded string ourselves so we can substitute on byte basis. We
         // only do this for simple fonts (1 byte per code).
-        if let Some(diffs) = &self.differences {
-            if !self.is_composite {
-                let mut s = String::with_capacity(bytes.len());
-                let base_decoded = match &self.encoding {
-                    Some(enc) => enc.bytes_to_string(bytes).ok(),
-                    None => None,
-                };
-                let base_chars: Option<Vec<char>> =
-                    base_decoded.as_ref().map(|d| d.chars().collect());
-                for (i, b) in bytes.iter().enumerate() {
-                    if let Some(c) = diffs.get(b) {
-                        s.push(*c);
-                    } else if let Some(bc) = base_chars.as_ref().and_then(|v| v.get(i)) {
-                        s.push(*bc);
-                    } else {
-                        s.push(*b as char);
-                    }
+        if let Some(diffs) = &self.differences
+            && !self.is_composite
+        {
+            let mut s = String::with_capacity(bytes.len());
+            let base_decoded = match &self.encoding {
+                Some(enc) => enc.bytes_to_string(bytes).ok(),
+                None => None,
+            };
+            let base_chars: Option<Vec<char>> = base_decoded.as_ref().map(|d| d.chars().collect());
+            for (i, b) in bytes.iter().enumerate() {
+                if let Some(c) = diffs.get(b) {
+                    s.push(*c);
+                } else if let Some(bc) = base_chars.as_ref().and_then(|v| v.get(i)) {
+                    s.push(*bc);
+                } else {
+                    s.push(*b as char);
                 }
-                return s;
             }
+            return s;
         }
         match &self.encoding {
             Some(enc) => enc.bytes_to_string(bytes).unwrap_or_else(|_| latin1(bytes)),

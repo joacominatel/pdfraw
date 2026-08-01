@@ -36,12 +36,11 @@ pub fn extract(doc: &LDoc, font_dict: &Dictionary) -> Option<Differences> {
                 // A name we cannot read is skipped, not fatal: aborting here
                 // would throw away every override already collected. The code
                 // still advances, because the position is consumed either way.
-                if let Ok(s) = std::str::from_utf8(name) {
-                    if let Some(c) = glyph_names::lookup(s) {
-                        if (0..=255).contains(&code) {
-                            out.insert(code as u8, c);
-                        }
-                    }
+                if let Ok(s) = std::str::from_utf8(name)
+                    && let Some(c) = glyph_names::lookup(s)
+                    && (0..=255).contains(&code)
+                {
+                    out.insert(code as u8, c);
                 }
                 code += 1;
             }
