@@ -1,0 +1,160 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [master, dev]
+  # Only the long-lived branches. A feature branch already gets a run through
+  # its pull request, and listening to both would double every job.
+  push:
+    branches: [master, dev]
+
+# The default GITHUB_TOKEN can write to most of the repository. Nothing here
+# needs more than reading the code.
+permissions:
+  contents: read
+
+# One run per ref. Pushing twice to a pull request supersedes the first run
+# rather than leaving it burning minutes on a commit nobody will merge.
+concurrency:
+  group: ci-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  # Backtraces cost nothing here and turn a bare "test failed" into something
+  # you can act on without re-running locally.
+  RUST_BACKTRACE: 1
+
+jobs:
+  # Cheapest check first: seconds, and it needs no dependency build.
+  fmt:
+    name: rustfmt
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
+        with:
+          toolchain: stable
+          components: rustfmt
+      - run: cargo fmt --all --check
+
+  clippy:
+    name: clippy
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
+        with:
+          toolchain: stable
+          components: clippy
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+      # The crate is at zero warnings. -D keeps it there instead of letting
+      # them accumulate until nobody reads the output.
+      - run: cargo clippy --all-features --all-targets --locked -- -D warnings
+
+  test:
+    name: test (${{ matrix.profile }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      # Both profiles, deliberately. The /FirstChar overflow this crate shipped
+      # panicked in debug and wrapped silently in release — checking one alone
+      # would have seen half the bug.
+      matrix:
+        profile: [debug, release]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          key: ${{ matrix.profile }}
+      - name: cargo test
+        run: |
+          cargo test --all-features --locked --no-fail-fast \
+            ${{ matrix.profile == 'release' && '--release' || '' }}
+
+  # Guards the mistake that forced 0.1.1 to be yanked: the manifest claimed
+  # 1.85 while lopdf 0.44 required 1.88, so the crate resolved as compatible
+  # on older toolchains and then failed to build a transitive dependency.
+  msrv:
+    name: minimum supported Rust version
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Read rust-version from Cargo.toml
+        id: msrv
+        run: |
+          version=$(grep -m1 '^rust-version' Cargo.toml | cut -d'"' -f2)
+          if [ -z "$version" ]; then
+            echo "::error::Cargo.toml declares no rust-version"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Declared MSRV: $version"
+      - uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
+        with:
+          toolchain: ${{ steps.msrv.outputs.version }}
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          key: msrv
+      # Building the library and its examples is enough: dev-dependencies may
+      # legitimately need a newer compiler than the crate itself promises.
+      - run: cargo build --all-features --locked
+
+  docs:
+    name: rustdoc
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          key: docs
+      - run: cargo doc --no-deps --all-features --locked
+        env:
+          RUSTDOCFLAGS: -D warnings
+
+  # `cargo package` picks up files that are untracked but not gitignored. The
+  # local pdf/ corpus — a third-party manual, and 90% of the archive — came
+  # within one command of shipping to crates.io, where nothing can be removed.
+  package:
+    name: package contents
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          key: package
+      - name: Reject stray files in the package
+        run: |
+          set -euo pipefail
+          cargo package --list --locked > files.txt
+          echo "Package contents:"
+          cat files.txt
+          # An empty list must not pass. `grep -v` finds no matches in an empty
+          # file, which reads as success and would wave through a run where
+          # `cargo package` produced nothing at all.
+          if [ ! -s files.txt ]; then
+            echo "::error::cargo package listed no files; refusing to treat that as a pass."
+            exit 1
+          fi
+          # Anything outside these paths is either a fixture that escaped the
+          # exclude list or something nobody meant to publish.
+          if grep -vE '^(src/|tests/|examples/|docs/|Cargo\.(toml|lock)|Cargo\.toml\.orig|README\.md|CHANGELOG\.md|LICENSE|\.gitignore|\.cargo_vcs_info\.json)' files.txt; then
+            echo '::error::The lines above are not expected in the published package. Add them to the exclude list in Cargo.toml.'
+            exit 1
+          fi
+      - run: cargo publish --dry-run --locked
