@@ -9,6 +9,31 @@ see the Status section of the README.
 
 ## [0.1.1] - 2026-07-31
 
+### Security
+
+Four defects let a PDF you did not write crash the parser or make it
+allocate far more memory than the input justifies. `pdfraw` parses
+untrusted files by design, so these are the sharpest items in this release.
+
+- **A hostile `/FirstChar` overflowed `u32`.** `/Widths` computed
+  `first_char + i` after casting `/FirstChar` straight to `u32`, so
+  `4294967295` or `-1` panicked in debug and wrapped silently in release.
+  A simple font is byte-indexed, so `/FirstChar` outside `0..=255` is now
+  rejected and the addition is checked.
+- **The layout grid was never clipped.** One glyph claiming `x0 = 1e8`
+  turned a two-char page into 13,793,104 output characters, and a 55-byte
+  content stream with a large `TJ` adjustment expanded to 2,758,623. Grid
+  positions are now clamped to 20,000 rows and columns — roughly two
+  orders of magnitude above what a real page needs.
+- **An `x_density` or `y_density` of `0` divided by zero**, saturating the
+  padding count to `i32::MAX` and attempting a ~2 GiB allocation.
+  Non-finite and non-positive densities now fall back to the pdfplumber
+  defaults with a warning.
+- **NaN coordinates were laundered into ±infinity.** `f32::min`/`max`
+  return the non-NaN operand, so folding from `INFINITY` turned an all-NaN
+  word into `±inf`, which then saturated the layout grid. Non-finite
+  values are now excluded rather than converted.
+
 ### Fixed
 
 - **`Char::size` reported the matrix scale instead of the font size.** A 12pt
@@ -50,7 +75,14 @@ see the Status section of the README.
 
 ### Added
 
+- **A `pdfraw` command-line tool**, shipped from the same crate. Writes
+  layout-preserving text to stdout, or to a file with `-o`, and reports
+  skipped text-less pages on stderr instead of dropping them silently.
+  Library consumers do not build it — Cargo skips a dependency's binaries.
 - `tests/regression_fixes.rs` — one reproduction per defect above.
+- `tests/adversarial_*.rs` — 144 tests written to break the library. The
+  ones that succeed are parked behind `#[ignore = "BUG: ..."]`; grep for
+  that string to read the inventory of known defects.
 - This changelog.
 
 ## [0.1.0]

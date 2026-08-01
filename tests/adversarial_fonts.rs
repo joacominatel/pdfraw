@@ -143,7 +143,6 @@ fn identity_h_font_without_to_unicode_emits_one_glyph_per_cid() {
 // ---------------------------------------------------------------------------
 
 #[test]
-#[ignore = "BUG: simple_widths computes `first_char + i` in u32, which overflows (debug panic / silent wrap in release) for a hostile /FirstChar"]
 fn widths_with_first_char_at_u32_max_does_not_overflow() {
     let font = simple_font("WinAnsiEncoding", 4_294_967_295, &[500, 500]);
     let chars = chars_with_font(font, "BT /F1 10 Tf 100 700 Td <41> Tj ET");
@@ -151,7 +150,6 @@ fn widths_with_first_char_at_u32_max_does_not_overflow() {
 }
 
 #[test]
-#[ignore = "BUG: a negative /FirstChar is cast to u32 by truncation, so `first_char + i` overflows and panics"]
 fn widths_with_negative_first_char_does_not_overflow() {
     let font = simple_font("WinAnsiEncoding", -1, &[500, 500]);
     let chars = chars_with_font(font, "BT /F1 10 Tf 100 700 Td <41> Tj ET");

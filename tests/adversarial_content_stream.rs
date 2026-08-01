@@ -199,7 +199,6 @@ fn tj_with_nested_arrays_and_nulls_does_not_panic() {
 }
 
 #[test]
-#[ignore = "BUG: a huge TJ adjustment is neither clamped nor clipped to the page, so a ~60-byte content stream expands to megabytes of layout output"]
 fn huge_tj_adjustment_does_not_inflate_layout_output() {
     let doc = PdfBuilder::new()
         .font("F1", ab_font())

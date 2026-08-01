@@ -120,22 +120,12 @@ fn build_word(chars: &[Indexed<'_>]) -> Option<Word> {
         return None;
     }
     let text: String = chars.iter().map(|(_, c)| c.text.as_str()).collect();
-    let x0 = chars
-        .iter()
-        .map(|(_, c)| c.x0)
-        .fold(f32::INFINITY, f32::min);
-    let x1 = chars
-        .iter()
-        .map(|(_, c)| c.x1)
-        .fold(f32::NEG_INFINITY, f32::max);
-    let top = chars
-        .iter()
-        .map(|(_, c)| c.top)
-        .fold(f32::INFINITY, f32::min);
-    let bottom = chars
-        .iter()
-        .map(|(_, c)| c.bottom)
-        .fold(f32::NEG_INFINITY, f32::max);
+    // A word made only of non-finite coordinates keeps NaN rather than being
+    // laundered into ±infinity, which would then saturate the layout grid.
+    let x0 = min_finite(chars.iter().map(|(_, c)| c.x0)).unwrap_or(f32::NAN);
+    let x1 = max_finite(chars.iter().map(|(_, c)| c.x1)).unwrap_or(f32::NAN);
+    let top = min_finite(chars.iter().map(|(_, c)| c.top)).unwrap_or(f32::NAN);
+    let bottom = max_finite(chars.iter().map(|(_, c)| c.bottom)).unwrap_or(f32::NAN);
 
     // The word's chars need not be contiguous in stream order, so the range
     // spans from the lowest to the highest index they occupy.
@@ -217,10 +207,16 @@ pub fn extract_text_layout(chars: &[Char], opts: &TextOptions) -> String {
         return String::new();
     }
 
+    // A density of zero (or a negative or non-finite one) would divide by
+    // zero, saturate the grid position to i32::MAX and try to allocate
+    // gigabytes of padding. Fall back to the pdfplumber defaults instead.
+    let x_density = sane_density(opts.x_density, DEFAULT_X_DENSITY, "x_density");
+    let y_density = sane_density(opts.y_density, DEFAULT_Y_DENSITY, "y_density");
+
     // Bounding box origin: smallest x0 and smallest top across all chars
     // (matches pdfplumber's default layout_bbox = page bbox of chars).
-    let x_origin = chars.iter().map(|c| c.x0).fold(f32::INFINITY, f32::min);
-    let y_origin = chars.iter().map(|c| c.top).fold(f32::INFINITY, f32::min);
+    let x_origin = min_finite(chars.iter().map(|c| c.x0)).unwrap_or(0.0);
+    let y_origin = min_finite(chars.iter().map(|c| c.top)).unwrap_or(0.0);
 
     // Group words back into lines using y_tolerance, preserving the
     // top-to-bottom order produced by extract_words.
@@ -239,8 +235,8 @@ pub fn extract_text_layout(chars: &[Char], opts: &TextOptions) -> String {
     let mut newlines_so_far: i32 = 0;
 
     for (i, line) in lines.iter().enumerate() {
-        let y_dist = (line[0].top - y_origin) / opts.y_density;
-        let target_row = y_dist.round() as i32;
+        let y_dist = (line[0].top - y_origin) / y_density;
+        let target_row = grid_position(y_dist, MAX_GRID_ROWS);
         let minimum = if i > 0 { 1 } else { 0 };
         let needed_newlines = (target_row - newlines_so_far).max(minimum);
         out.extend(std::iter::repeat_n('\n', needed_newlines as usize));
@@ -248,8 +244,8 @@ pub fn extract_text_layout(chars: &[Char], opts: &TextOptions) -> String {
 
         let mut col: i32 = 0;
         for (j, w) in line.iter().enumerate() {
-            let x_dist = (w.x0 - x_origin) / opts.x_density;
-            let target_col = x_dist.round() as i32;
+            let x_dist = (w.x0 - x_origin) / x_density;
+            let target_col = grid_position(x_dist, MAX_GRID_COLUMNS);
             let minimum = if j > 0 { 1 } else { 0 };
             let needed_spaces = (target_col - col).max(minimum);
             out.extend(std::iter::repeat_n(' ', needed_spaces as usize));
@@ -260,6 +256,63 @@ pub fn extract_text_layout(chars: &[Char], opts: &TextOptions) -> String {
         }
     }
     out
+}
+
+/// Widest virtual grid we will pad out to, in columns.
+///
+/// A US Letter page is about 84 columns at the default density, so this is
+/// two orders of magnitude of headroom for legitimate documents. Its real
+/// job is to stop a single glyph claiming `x0 = 1e8` from turning a two-char
+/// page into tens of megabytes of spaces.
+const MAX_GRID_COLUMNS: i32 = 20_000;
+
+/// Tallest virtual grid we will pad out to, in rows. Same reasoning as
+/// [`MAX_GRID_COLUMNS`]: a Letter page is about 61 rows by default.
+const MAX_GRID_ROWS: i32 = 20_000;
+
+const DEFAULT_X_DENSITY: f32 = 7.25;
+const DEFAULT_Y_DENSITY: f32 = 13.0;
+
+/// Convert a distance in grid units into a clamped, non-negative index.
+///
+/// `as i32` already saturates on infinity and yields 0 on NaN, but the raw
+/// value can still be astronomically large, so it is clamped to `max`.
+fn grid_position(distance: f32, max: i32) -> i32 {
+    if distance.is_nan() {
+        return 0;
+    }
+    (distance.round() as i32).clamp(0, max)
+}
+
+/// Replace a density that cannot produce a usable grid with `fallback`.
+fn sane_density(value: f32, fallback: f32, name: &str) -> f32 {
+    if value.is_finite() && value > 0.0 {
+        return value;
+    }
+    log::warn!("{name} = {value} is not a usable grid density; falling back to {fallback}");
+    fallback
+}
+
+/// Smallest finite value in `values`, or `None` if there is no finite one.
+///
+/// `f32::min` returns the non-NaN operand, so folding from `f32::INFINITY`
+/// silently turns an all-NaN input into `+inf` — which then saturates the
+/// layout grid. This keeps non-finite values out instead of laundering them.
+fn min_finite(values: impl Iterator<Item = f32>) -> Option<f32> {
+    values
+        .filter(|v| v.is_finite())
+        .fold(None, |acc: Option<f32>, v| {
+            Some(acc.map_or(v, |a| a.min(v)))
+        })
+}
+
+/// Largest finite value in `values`, or `None` if there is no finite one.
+fn max_finite(values: impl Iterator<Item = f32>) -> Option<f32> {
+    values
+        .filter(|v| v.is_finite())
+        .fold(None, |acc: Option<f32>, v| {
+            Some(acc.map_or(v, |a| a.max(v)))
+        })
 }
 
 fn same_line(a: &Word, b: &Word, y_tol: f32) -> bool {

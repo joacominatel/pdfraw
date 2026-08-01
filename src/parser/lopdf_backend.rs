@@ -524,8 +524,11 @@ impl<'doc> FontInfo<'doc> {
 }
 
 fn simple_widths(dict: &Dictionary) -> Option<Widths> {
+    // A simple font is indexed by single bytes, so /FirstChar outside 0..=255
+    // is malformed. `as u32` would have turned -1 into u32::MAX and then
+    // overflowed the addition below (a debug panic, a silent wrap in release).
     let first_char = dict.get(b"FirstChar").ok().and_then(|o| match o {
-        Object::Integer(i) => Some(*i as u32),
+        Object::Integer(i) => u8::try_from(*i).ok().map(u32::from),
         _ => None,
     })?;
     let widths_arr = match dict.get(b"Widths").ok()? {
@@ -534,8 +537,14 @@ fn simple_widths(dict: &Dictionary) -> Option<Widths> {
     };
     let mut by_code = HashMap::with_capacity(widths_arr.len());
     for (i, w) in widths_arr.iter().enumerate() {
+        let Some(code) = u32::try_from(i)
+            .ok()
+            .and_then(|i| first_char.checked_add(i))
+        else {
+            break;
+        };
         if let Some(v) = num_of(w) {
-            by_code.insert(first_char + i as u32, v / 1000.0);
+            by_code.insert(code, v / 1000.0);
         }
     }
     let default_width = dict
