@@ -36,6 +36,21 @@ untrusted files by design, so these are the sharpest items in this release.
 
 ### Fixed
 
+- **`/Rotate` was reported but never applied.** A quarter-turned page kept
+  its unrotated dimensions and its glyphs stayed in unrotated coordinates,
+  so a landscape scan came out sideways with no indication. The rotation is
+  now composed into the transform stack as the outermost step, so page
+  dimensions, glyph positions, `Char::size` and `Char::upright` all come out
+  in displayed space. `/Rotate` is also normalized: negatives wrap into
+  range, and a value that is not a multiple of 90 is reported as `0` with a
+  warning instead of being passed through.
+- **Text shown outside a `BT`/`ET` pair was silently dropped.** Show
+  operators were gated on being inside a text object, so a content stream
+  that omits `BT`, or closes it early, lost all of its text — and
+  `is_scanned()` did not flag the page either, because it does count the
+  `Tj`. The caller was told neither. Every reader that matters renders such
+  text, so `pdfraw` now does too.
+
 - **`Char::size` reported the matrix scale instead of the font size.** A 12pt
   font drawn under a 0.75 CTM came out as `0.75` rather than `9.0`, so every
   glyph on a real-world page shared one meaningless value. This also made

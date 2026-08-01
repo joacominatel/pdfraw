@@ -13,7 +13,7 @@ use lopdf::content::Content;
 use lopdf::{Dictionary, Document as LDoc, Encoding, Object, ObjectId};
 use std::collections::HashMap;
 
-/// Read width/height/rotation for the page.
+/// Read the media box and rotation for the page.
 pub(crate) fn page_metrics(
     doc: &LDoc,
     page_id: ObjectId,
@@ -25,18 +25,35 @@ pub(crate) fn page_metrics(
             page: page_index,
             reason: "missing /MediaBox".into(),
         })?;
-    let (width, height) = media_box_dimensions(page_index, &media_box)?;
+    let (media_width, media_height) = media_box_dimensions(page_index, &media_box)?;
     let rotation = resolve_inheritable(doc, page, b"Rotate")
         .and_then(|o| match o {
-            Object::Integer(i) => Some(i as i16),
+            Object::Integer(i) => Some(i),
+            Object::Real(r) => Some(r as i64),
             _ => None,
         })
+        .map(normalize_rotation)
         .unwrap_or(0);
     Ok(PageMetrics {
-        width,
-        height,
+        media_width,
+        media_height,
         rotation,
     })
+}
+
+/// Fold an arbitrary `/Rotate` into the `{0, 90, 180, 270}` set that
+/// [`PageMetrics::rotation`] promises.
+///
+/// PDF requires `/Rotate` to be a multiple of 90, and permits negatives.
+/// Files get both wrong, so negatives wrap into range and anything that is
+/// not a quarter turn is discarded rather than passed through.
+fn normalize_rotation(raw: i64) -> i16 {
+    let wrapped = raw.rem_euclid(360);
+    if wrapped % 90 != 0 {
+        log::warn!("/Rotate {raw} is not a multiple of 90 — treating the page as unrotated");
+        return 0;
+    }
+    wrapped as i16
 }
 
 /// Hard cap on how far up the `/Parent` chain we walk.
@@ -115,10 +132,14 @@ fn media_box_dimensions(page_index: usize, o: &Object) -> Result<(f32, f32)> {
 pub(crate) fn extract_chars(page: &Page<'_>) -> Result<Vec<Char>> {
     let doc = &page.document().inner;
     let page_id = page.page_id();
+    let metrics = page.metrics();
     let geom = PageGeometry {
-        height: page.height(),
+        height: metrics.display_height(),
         doctop_offset: page.document().doctop_offset(page.index()),
     };
+    // `/Rotate` is folded in as the outermost transform, so every glyph
+    // position, size and uprightness comes out already in displayed space.
+    let page_rotation = metrics.rotation_matrix();
 
     let raw = doc.get_page_content(page_id);
     let content = Content::decode(&raw).map_err(|e| Error::ContentStream {
@@ -135,7 +156,6 @@ pub(crate) fn extract_chars(page: &Page<'_>) -> Result<Vec<Char>> {
 
     let mut tm = TextMatrices::default();
     let mut gs_stack: Vec<GraphicsState> = vec![GraphicsState::default()];
-    let mut in_text = false;
     let mut out = Vec::new();
 
     // The stack is never allowed to empty (see the "Q" arm), so these two
@@ -172,14 +192,11 @@ pub(crate) fn extract_chars(page: &Page<'_>) -> Result<Vec<Char>> {
                 }
             }
 
-            // text object
-            "BT" => {
-                in_text = true;
-                tm = TextMatrices::default();
-            }
-            "ET" => {
-                in_text = false;
-            }
+            // Text object. `BT` resets the text matrices; `ET` carries no
+            // state of its own now that showing text is not gated on being
+            // inside a text object.
+            "BT" => tm = TextMatrices::default(),
+            "ET" => {}
 
             // text state
             "Tf" => {
@@ -227,21 +244,44 @@ pub(crate) fn extract_chars(page: &Page<'_>) -> Result<Vec<Char>> {
                 tm.next_line(0.0, -leading);
             }
 
-            // text showing
-            "Tj" if in_text => {
+            // Text showing.
+            //
+            // Deliberately not gated on being inside a BT/ET pair. The spec
+            // says a show operator belongs to a text object, but files in the
+            // wild omit the BT or close it early, and every reader that
+            // matters still draws that text. Refusing to would lose the whole
+            // page silently — and `is_scanned` would not flag it either,
+            // because it does count the Tj.
+            "Tj" => {
                 if let Some(bytes) = first_string(&op.operands) {
-                    emit_string(&bytes, &mut tm, gs!(), &fonts, &geom, &mut out);
+                    emit_string(
+                        &bytes,
+                        &mut tm,
+                        gs!(),
+                        &fonts,
+                        &geom,
+                        page_rotation,
+                        &mut out,
+                    );
                 }
             }
-            "'" if in_text => {
+            "'" => {
                 // next line + show
                 let leading = gs!().text.leading;
                 tm.next_line(0.0, -leading);
                 if let Some(bytes) = first_string(&op.operands) {
-                    emit_string(&bytes, &mut tm, gs!(), &fonts, &geom, &mut out);
+                    emit_string(
+                        &bytes,
+                        &mut tm,
+                        gs!(),
+                        &fonts,
+                        &geom,
+                        page_rotation,
+                        &mut out,
+                    );
                 }
             }
-            "\"" if in_text => {
+            "\"" => {
                 // operands: aw ac string
                 if op.operands.len() == 3 {
                     let t = &mut gs_mut!().text;
@@ -251,16 +291,30 @@ pub(crate) fn extract_chars(page: &Page<'_>) -> Result<Vec<Char>> {
                 let leading = gs!().text.leading;
                 tm.next_line(0.0, -leading);
                 if let Some(bytes) = op.operands.last().and_then(string_bytes) {
-                    emit_string(&bytes, &mut tm, gs!(), &fonts, &geom, &mut out);
+                    emit_string(
+                        &bytes,
+                        &mut tm,
+                        gs!(),
+                        &fonts,
+                        &geom,
+                        page_rotation,
+                        &mut out,
+                    );
                 }
             }
-            "TJ" if in_text => {
+            "TJ" => {
                 if let Some(Object::Array(arr)) = op.operands.first() {
                     for item in arr {
                         match item {
-                            Object::String(bytes, _) => {
-                                emit_string(bytes, &mut tm, gs!(), &fonts, &geom, &mut out)
-                            }
+                            Object::String(bytes, _) => emit_string(
+                                bytes,
+                                &mut tm,
+                                gs!(),
+                                &fonts,
+                                &geom,
+                                page_rotation,
+                                &mut out,
+                            ),
                             Object::Integer(_) | Object::Real(_) => {
                                 let t = &gs!().text;
                                 let adj = num_of(item).unwrap_or(0.0);
@@ -569,9 +623,10 @@ fn emit_string(
     gs: &GraphicsState,
     fonts: &FontTable,
     geom: &PageGeometry,
+    page_rotation: Matrix,
     out: &mut Vec<Char>,
 ) {
-    let ctm = gs.ctm;
+    let ctm = gs.ctm.then(page_rotation);
     let ts = &gs.text;
     let font = fonts.get(&ts.font_name);
 

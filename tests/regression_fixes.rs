@@ -5,6 +5,7 @@
 //! the hang, time out).
 
 mod common;
+mod synthetic;
 
 use compact_str::CompactString;
 use lopdf::content::{Content, Operation};
@@ -302,6 +303,104 @@ fn doctop_offsets_by_the_height_of_preceding_pages() {
         "page 1 doctop must be top + {page_height}: top={}, doctop={}",
         c1.top,
         c1.doctop
+    );
+}
+
+// ============================================================================
+// /Rotate must move glyph coordinates, not just the page dimensions
+// ============================================================================
+
+/// Build a 595x842 page carrying `/Rotate degrees`, with one glyph drawn at
+/// PDF user space (100, 700) — near the top-left of the unrotated page.
+fn rotated_page_glyph(degrees: i64) -> (f32, f32, Char) {
+    let doc = synthetic::PdfBuilder::new()
+        .font("F1", synthetic::simple_font("WinAnsiEncoding", 65, &[1000]))
+        .content("BT /F1 10 Tf 100 700 Td <41> Tj ET")
+        .media_box(vec![0.into(), 0.into(), 595.into(), 842.into()])
+        .page_entry("Rotate", degrees)
+        .build();
+    let page = doc.page(0).unwrap();
+    let (w, h) = (page.width(), page.height());
+    let c = page.chars().unwrap()[0].clone();
+    (w, h, c)
+}
+
+#[test]
+fn unrotated_page_places_the_glyph_below_its_baseline_distance_from_the_top() {
+    let (w, h, c) = rotated_page_glyph(0);
+    assert_eq!((w, h), (595.0, 842.0));
+    assert!((c.x0 - 100.0).abs() < 0.5, "x0={}", c.x0);
+    // 842 - 700 = 142 points down from the top edge.
+    assert!((c.bottom - 142.0).abs() < 0.5, "bottom={}", c.bottom);
+}
+
+#[test]
+fn quarter_turn_rotation_moves_the_glyph_into_displayed_space() {
+    // Turning the page 90 degrees clockwise sends the left edge to the top,
+    // so a glyph 100pt from the left lands 100pt from the top, and one
+    // 142pt from the top lands 142pt from the right edge (595 -> x = 700).
+    let (w, h, c) = rotated_page_glyph(90);
+    assert_eq!((w, h), (842.0, 595.0), "dimensions did not swap");
+    assert!((c.x0 - 700.0).abs() < 0.5, "x0={} (expected 700)", c.x0);
+    assert!(
+        (c.bottom - 100.0).abs() < 0.5,
+        "bottom={} (expected 100)",
+        c.bottom
+    );
+    assert!(
+        c.x0 >= 0.0 && c.x0 <= w && c.bottom >= 0.0 && c.bottom <= h,
+        "glyph fell outside the displayed page: {c:?} on {w}x{h}"
+    );
+    // This fixture draws horizontal text in unrotated space, so on the
+    // rotated page it reads sideways. `upright` follows the page rotation.
+    assert!(
+        !c.upright,
+        "horizontal text on a quarter-turned page reads sideways"
+    );
+}
+
+#[test]
+fn text_drawn_to_survive_a_quarter_turn_is_reported_upright() {
+    // The usual shape of a real /Rotate 90 page: the content stream turns
+    // the text counter-clockwise so it reads correctly once the page is
+    // turned clockwise. The two rotations cancel.
+    let doc = synthetic::PdfBuilder::new()
+        .font("F1", synthetic::simple_font("WinAnsiEncoding", 65, &[1000]))
+        .content("BT /F1 10 Tf 0 1 -1 0 100 700 Tm <41> Tj ET")
+        .media_box(vec![0.into(), 0.into(), 595.into(), 842.into()])
+        .page_entry("Rotate", 90)
+        .build();
+    let page = doc.page(0).unwrap();
+    let c = page.chars().unwrap()[0].clone();
+    assert!(
+        c.upright,
+        "text authored to read correctly after /Rotate 90 came out sideways: {c:?}"
+    );
+}
+
+#[test]
+fn half_turn_rotation_mirrors_the_glyph_through_the_page_centre() {
+    let (w, h, c) = rotated_page_glyph(180);
+    assert_eq!(
+        (w, h),
+        (595.0, 842.0),
+        "a half turn does not swap dimensions"
+    );
+    assert!((c.x0 - 495.0).abs() < 1.0, "x0={} (expected 595-100)", c.x0);
+    assert!(
+        (c.bottom - 700.0).abs() < 1.0,
+        "bottom={} (expected 700)",
+        c.bottom
+    );
+}
+
+#[test]
+fn three_quarter_turn_rotation_keeps_the_glyph_on_the_page() {
+    let (w, h, c) = rotated_page_glyph(270);
+    assert_eq!((w, h), (842.0, 595.0), "dimensions did not swap");
+    assert!(
+        c.x0 >= 0.0 && c.x0 <= w && c.bottom >= 0.0 && c.bottom <= h,
+        "glyph fell outside the displayed page: {c:?} on {w}x{h}"
     );
 }
 

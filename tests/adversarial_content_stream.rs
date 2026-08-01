@@ -29,7 +29,6 @@ fn chars_of(content: &str) -> Vec<Char> {
 // ---------------------------------------------------------------------------
 
 #[test]
-#[ignore = "BUG: show operators are gated on `in_text`, so a content stream that omits BT silently loses all of its text (pdfminer/pdfplumber still render it)"]
 fn text_shown_without_bt_is_still_extracted() {
     let chars = chars_of("/F1 10 Tf 100 700 Td <41> Tj");
     assert_eq!(
@@ -40,7 +39,6 @@ fn text_shown_without_bt_is_still_extracted() {
 }
 
 #[test]
-#[ignore = "BUG: text shown after a stray ET is dropped because `in_text` is cleared and never restored"]
 fn text_shown_after_stray_et_is_still_extracted() {
     let chars = chars_of("BT /F1 10 Tf 100 700 Td ET <41> Tj");
     assert_eq!(chars.len(), 1, "text after a stray ET was dropped");
