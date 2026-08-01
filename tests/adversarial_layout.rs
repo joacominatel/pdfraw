@@ -169,7 +169,6 @@ fn extract_text_layout_terminates_when_x_density_is_zero() {
 // ---------------------------------------------------------------------------
 
 #[test]
-#[ignore = "BUG: use_text_flow only skips the global sort; chars are still sorted by x0 inside every line, so stream order is lost"]
 fn extract_words_preserves_stream_order_when_use_text_flow_is_set() {
     // The PDF drew "B" before "A" on the same line. With use_text_flow the
     // extractor must not reorder them.
@@ -187,7 +186,6 @@ fn extract_words_preserves_stream_order_when_use_text_flow_is_set() {
 }
 
 #[test]
-#[ignore = "BUG: `Char::upright` is documented as a layout filter but extract_words/extract_text_layout never read it, so rotated glyphs pollute horizontal lines"]
 fn extract_words_skips_non_upright_glyphs() {
     let mut sideways = ch("R", 30.0, 40.0, 10.0, 22.0);
     sideways.upright = false;
@@ -215,7 +213,6 @@ fn extract_words_ignores_zero_length_char_between_glyphs() {
 // ---------------------------------------------------------------------------
 
 #[test]
-#[ignore = "BUG: extract_words clusters lines by chaining (each char within y_tolerance of the previous) but extract_text_layout regroups against the first word only, so a drifting baseline is split into extra output lines"]
 fn extract_text_layout_keeps_one_line_when_word_extraction_saw_one_line() {
     // Baseline drifts by 2.5pt per word — inside the 3pt tolerance chain.
     let chars = vec![

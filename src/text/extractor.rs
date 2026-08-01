@@ -53,9 +53,15 @@ pub fn extract_words(chars: &[Char], opts: &WordOptions) -> Vec<Word> {
         Cow::Borrowed(chars)
     };
 
-    let mut indices: Vec<usize> = (0..working.len()).collect();
+    // `Char::upright` is documented as a layout filter — "layout extraction
+    // only considers upright glyphs" — so a sideways glyph must not be
+    // clustered into the horizontal line it happens to overlap.
+    let mut indices: Vec<usize> = (0..working.len()).filter(|&i| working[i].upright).collect();
     if !opts.use_text_flow {
         indices.sort_by(|&a, &b| compare_chars(&working[a], &working[b]));
+    }
+    if indices.is_empty() {
+        return Vec::new();
     }
 
     // Carry each char's index in `working` alongside the reference. The
@@ -68,7 +74,14 @@ pub fn extract_words(chars: &[Char], opts: &WordOptions) -> Vec<Word> {
     let mut out = Vec::new();
     for line in lines {
         let mut line: Vec<Indexed<'_>> = line.into_iter().copied().collect();
-        line.sort_by(|(_, a), (_, b)| a.x0.partial_cmp(&b.x0).unwrap_or(Ordering::Equal));
+        // `use_text_flow` means "walk the glyphs as the PDF drew them". A
+        // per-line sort by x0 undid that just as thoroughly as the global
+        // sort, so the option only half worked.
+        if !opts.use_text_flow {
+            line.sort_by(|(_, a), (_, b)| a.x0.partial_cmp(&b.x0).unwrap_or(Ordering::Equal));
+        } else {
+            line.sort_by_key(|(i, _)| *i);
+        }
 
         let mut current: Vec<Indexed<'_>> = Vec::new();
         for (idx, c) in line {
@@ -226,10 +239,16 @@ pub fn extract_text_layout(chars: &[Char], opts: &TextOptions) -> String {
 
     // Group words back into lines using y_tolerance, preserving the
     // top-to-bottom order produced by extract_words.
+    //
+    // The comparison is against the *previous* word, not the first one in the
+    // line. `extract_words` clusters chars by chaining — each within
+    // y_tolerance of the one before — so measuring from `line[0]` here made
+    // the two stages disagree: a baseline drifting a couple of points per
+    // word was one line to the word extractor and several to the layout.
     let mut lines: Vec<Vec<&Word>> = Vec::new();
     for w in &words {
         match lines.last_mut() {
-            Some(line) if same_line(line[0], w, opts.y_tolerance) => line.push(w),
+            Some(line) if same_line(line[line.len() - 1], w, opts.y_tolerance) => line.push(w),
             _ => lines.push(vec![w]),
         }
     }
