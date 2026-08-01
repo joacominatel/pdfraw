@@ -39,13 +39,23 @@ pub(crate) fn page_metrics(
     })
 }
 
+/// Hard cap on how far up the `/Parent` chain we walk.
+///
+/// A well-formed page tree is a handful of levels deep. A malformed (or
+/// hostile) PDF can point two `/Pages` nodes at each other, which would
+/// otherwise spin forever, so we stop rather than trust the file.
+const MAX_PAGE_TREE_DEPTH: usize = 64;
+
 /// Walk the page-tree `/Parent` chain looking for an inheritable key.
 ///
 /// PDF defines `MediaBox`, `Rotate`, `Resources`, and `CropBox` as
 /// inheritable from the closest ancestor `/Pages` node that defines them.
+///
+/// Returns `None` if the key is absent, the chain breaks, or the chain is
+/// longer than [`MAX_PAGE_TREE_DEPTH`] (which a cycle always is).
 fn resolve_inheritable(doc: &LDoc, page: &Dictionary, key: &[u8]) -> Option<Object> {
     let mut cursor: &Dictionary = page;
-    loop {
+    for _ in 0..MAX_PAGE_TREE_DEPTH {
         if let Ok(v) = cursor.get(key) {
             return Some(deref(doc, v.clone()));
         }
@@ -57,6 +67,8 @@ fn resolve_inheritable(doc: &LDoc, page: &Dictionary, key: &[u8]) -> Option<Obje
         };
         cursor = parent;
     }
+    log::warn!("/Parent chain exceeded {MAX_PAGE_TREE_DEPTH} levels — treating as cyclic");
+    None
 }
 
 fn deref(doc: &LDoc, obj: Object) -> Object {
@@ -103,14 +115,12 @@ fn media_box_dimensions(page_index: usize, o: &Object) -> Result<(f32, f32)> {
 pub(crate) fn extract_chars(page: &Page<'_>) -> Result<Vec<Char>> {
     let doc = &page.document().inner;
     let page_id = page.page_id();
-    let page_height = page.height();
+    let geom = PageGeometry {
+        height: page.height(),
+        doctop_offset: page.document().doctop_offset(page.index()),
+    };
 
-    let raw = doc
-        .get_page_content(page_id)
-        .map_err(|e| Error::ContentStream {
-            page: page.index(),
-            reason: format!("get_page_content: {e}"),
-        })?;
+    let raw = doc.get_page_content(page_id);
     let content = Content::decode(&raw).map_err(|e| Error::ContentStream {
         page: page.index(),
         reason: format!("decode content: {e}"),
@@ -123,34 +133,49 @@ pub(crate) fn extract_chars(page: &Page<'_>) -> Result<Vec<Char>> {
         }
     }
 
-    let mut ts = TextState::default();
-    let mut gs_stack: Vec<Matrix> = vec![Matrix::IDENTITY];
+    let mut tm = TextMatrices::default();
+    let mut gs_stack: Vec<GraphicsState> = vec![GraphicsState::default()];
     let mut in_text = false;
     let mut out = Vec::new();
 
+    // The stack is never allowed to empty (see the "Q" arm), so these two
+    // helpers can always hand back a live graphics state.
+    macro_rules! gs {
+        () => {
+            gs_stack.last().expect("graphics stack is never empty")
+        };
+    }
+    macro_rules! gs_mut {
+        () => {
+            gs_stack.last_mut().expect("graphics stack is never empty")
+        };
+    }
+
     for op in content.operations {
         match op.operator.as_str() {
-            // graphics state
-            "q" => gs_stack.push(*gs_stack.last().unwrap_or(&Matrix::IDENTITY)),
+            // graphics state — q/Q save and restore the CTM *and* the text
+            // state parameters (PDF 32000-1, Table 52).
+            "q" => {
+                let top = gs!().clone();
+                gs_stack.push(top);
+            }
             "Q" => {
                 gs_stack.pop();
                 if gs_stack.is_empty() {
-                    gs_stack.push(Matrix::IDENTITY);
+                    gs_stack.push(GraphicsState::default());
                 }
             }
             "cm" => {
                 if let Some(m) = matrix_from_operands(&op.operands) {
-                    if let Some(top) = gs_stack.last_mut() {
-                        *top = m.then(*top);
-                    }
+                    let top = gs_mut!();
+                    top.ctm = m.then(top.ctm);
                 }
             }
 
             // text object
             "BT" => {
                 in_text = true;
-                ts.tm = Matrix::IDENTITY;
-                ts.tlm = Matrix::IDENTITY;
+                tm = TextMatrices::default();
             }
             "ET" => {
                 in_text = false;
@@ -162,22 +187,22 @@ pub(crate) fn extract_chars(page: &Page<'_>) -> Result<Vec<Char>> {
                     op.operands.first().and_then(name_of),
                     op.operands.get(1).and_then(num_of),
                 ) {
-                    ts.font_name = name;
-                    ts.font_size = size;
+                    let t = &mut gs_mut!().text;
+                    t.font_name = name;
+                    t.font_size = size;
                 }
             }
-            "Tc" => ts.char_space = first_num(&op.operands).unwrap_or(0.0),
-            "Tw" => ts.word_space = first_num(&op.operands).unwrap_or(0.0),
-            "Tz" => ts.h_scale = first_num(&op.operands).unwrap_or(100.0) / 100.0,
-            "TL" => ts.leading = first_num(&op.operands).unwrap_or(0.0),
-            "Ts" => ts.rise = first_num(&op.operands).unwrap_or(0.0),
+            "Tc" => gs_mut!().text.char_space = first_num(&op.operands).unwrap_or(0.0),
+            "Tw" => gs_mut!().text.word_space = first_num(&op.operands).unwrap_or(0.0),
+            "Tz" => gs_mut!().text.h_scale = first_num(&op.operands).unwrap_or(100.0) / 100.0,
+            "TL" => gs_mut!().text.leading = first_num(&op.operands).unwrap_or(0.0),
+            "Ts" => gs_mut!().text.rise = first_num(&op.operands).unwrap_or(0.0),
             "Tr" => { /* rendering mode ignored — we emit all glyphs */ }
 
             // text positioning
             "Tm" => {
                 if let Some(m) = matrix_from_operands(&op.operands) {
-                    ts.tm = m;
-                    ts.tlm = m;
+                    tm.set_line(m);
                 }
             }
             "Td" => {
@@ -185,9 +210,7 @@ pub(crate) fn extract_chars(page: &Page<'_>) -> Result<Vec<Char>> {
                     op.operands.first().and_then(num_of),
                     op.operands.get(1).and_then(num_of),
                 ) {
-                    let new = Matrix::translation(tx, ty).then(ts.tlm);
-                    ts.tm = new;
-                    ts.tlm = new;
+                    tm.next_line(tx, ty);
                 }
             }
             "TD" => {
@@ -195,65 +218,54 @@ pub(crate) fn extract_chars(page: &Page<'_>) -> Result<Vec<Char>> {
                     op.operands.first().and_then(num_of),
                     op.operands.get(1).and_then(num_of),
                 ) {
-                    ts.leading = -ty;
-                    let new = Matrix::translation(tx, ty).then(ts.tlm);
-                    ts.tm = new;
-                    ts.tlm = new;
+                    gs_mut!().text.leading = -ty;
+                    tm.next_line(tx, ty);
                 }
             }
             "T*" => {
-                let new = Matrix::translation(0.0, -ts.leading).then(ts.tlm);
-                ts.tm = new;
-                ts.tlm = new;
+                let leading = gs!().text.leading;
+                tm.next_line(0.0, -leading);
             }
 
             // text showing
             "Tj" if in_text => {
                 if let Some(bytes) = first_string(&op.operands) {
-                    emit_string(&bytes, &mut ts, &gs_stack, &fonts, page_height, &mut out);
+                    emit_string(&bytes, &mut tm, gs!(), &fonts, &geom, &mut out);
                 }
             }
             "'" if in_text => {
                 // next line + show
-                let new = Matrix::translation(0.0, -ts.leading).then(ts.tlm);
-                ts.tm = new;
-                ts.tlm = new;
+                let leading = gs!().text.leading;
+                tm.next_line(0.0, -leading);
                 if let Some(bytes) = first_string(&op.operands) {
-                    emit_string(&bytes, &mut ts, &gs_stack, &fonts, page_height, &mut out);
+                    emit_string(&bytes, &mut tm, gs!(), &fonts, &geom, &mut out);
                 }
             }
             "\"" if in_text => {
                 // operands: aw ac string
                 if op.operands.len() == 3 {
-                    ts.word_space = num_of(&op.operands[0]).unwrap_or(0.0);
-                    ts.char_space = num_of(&op.operands[1]).unwrap_or(0.0);
+                    let t = &mut gs_mut!().text;
+                    t.word_space = num_of(&op.operands[0]).unwrap_or(0.0);
+                    t.char_space = num_of(&op.operands[1]).unwrap_or(0.0);
                 }
-                let new = Matrix::translation(0.0, -ts.leading).then(ts.tlm);
-                ts.tm = new;
-                ts.tlm = new;
+                let leading = gs!().text.leading;
+                tm.next_line(0.0, -leading);
                 if let Some(bytes) = op.operands.last().and_then(string_bytes) {
-                    emit_string(&bytes, &mut ts, &gs_stack, &fonts, page_height, &mut out);
+                    emit_string(&bytes, &mut tm, gs!(), &fonts, &geom, &mut out);
                 }
             }
             "TJ" if in_text => {
                 if let Some(Object::Array(arr)) = op.operands.first() {
                     for item in arr {
                         match item {
-                            Object::String(bytes, _) => emit_string(
-                                bytes,
-                                &mut ts,
-                                &gs_stack,
-                                &fonts,
-                                page_height,
-                                &mut out,
-                            ),
-                            Object::Integer(i) => {
-                                let tx = -(*i as f32 / 1000.0) * ts.font_size * ts.h_scale;
-                                ts.tm = Matrix::translation(tx, 0.0).then(ts.tm);
+                            Object::String(bytes, _) => {
+                                emit_string(bytes, &mut tm, gs!(), &fonts, &geom, &mut out)
                             }
-                            Object::Real(r) => {
-                                let tx = -(*r / 1000.0) * ts.font_size * ts.h_scale;
-                                ts.tm = Matrix::translation(tx, 0.0).then(ts.tm);
+                            Object::Integer(_) | Object::Real(_) => {
+                                let t = &gs!().text;
+                                let adj = num_of(item).unwrap_or(0.0);
+                                let tx = -(adj / 1000.0) * t.font_size * t.h_scale;
+                                tm.advance(tx);
                             }
                             _ => {}
                         }
@@ -314,10 +326,22 @@ fn first_string(operands: &[Object]) -> Option<Vec<u8>> {
 // Text state and fonts
 // ============================================================================
 
+/// Where the page sits, so glyph coordinates can be flipped to top-down and
+/// offset into document space.
+struct PageGeometry {
+    /// Page height in points, used to flip PDF's bottom-up y axis.
+    height: f32,
+    /// Sum of the heights of every preceding page, for `Char::doctop`.
+    doctop_offset: f32,
+}
+
+/// The text-state parameters that PDF stores in the graphics state and that
+/// `q`/`Q` therefore save and restore (PDF 32000-1, Table 52).
+///
+/// Note that `Tm`/`Tlm` are deliberately *not* here: the text matrices are
+/// reset by `BT` and are not part of the saved graphics state.
 #[derive(Debug, Clone)]
-struct TextState {
-    tm: Matrix,
-    tlm: Matrix,
+struct TextParams {
     font_name: Vec<u8>,
     font_size: f32,
     char_space: f32,
@@ -327,11 +351,9 @@ struct TextState {
     rise: f32,
 }
 
-impl Default for TextState {
+impl Default for TextParams {
     fn default() -> Self {
         Self {
-            tm: Matrix::IDENTITY,
-            tlm: Matrix::IDENTITY,
             font_name: Vec::new(),
             font_size: 1.0,
             char_space: 0.0,
@@ -340,6 +362,49 @@ impl Default for TextState {
             leading: 0.0,
             rise: 0.0,
         }
+    }
+}
+
+/// One entry of the `q`/`Q` stack.
+#[derive(Debug, Clone, Default)]
+struct GraphicsState {
+    ctm: Matrix,
+    text: TextParams,
+}
+
+/// The text matrix and text line matrix, which live outside the graphics
+/// state and are reset by every `BT`.
+#[derive(Debug, Clone, Copy)]
+struct TextMatrices {
+    tm: Matrix,
+    tlm: Matrix,
+}
+
+impl Default for TextMatrices {
+    fn default() -> Self {
+        Self {
+            tm: Matrix::IDENTITY,
+            tlm: Matrix::IDENTITY,
+        }
+    }
+}
+
+impl TextMatrices {
+    /// `Tm`: replace both matrices.
+    fn set_line(&mut self, m: Matrix) {
+        self.tm = m;
+        self.tlm = m;
+    }
+
+    /// `Td`/`TD`/`T*`/`'`: move to a new line relative to the line matrix.
+    fn next_line(&mut self, tx: f32, ty: f32) {
+        let new = Matrix::translation(tx, ty).then(self.tlm);
+        self.set_line(new);
+    }
+
+    /// Advance the text matrix horizontally within the current line.
+    fn advance(&mut self, tx: f32) {
+        self.tm = Matrix::translation(tx, 0.0).then(self.tm);
     }
 }
 
@@ -491,13 +556,14 @@ fn simple_widths(dict: &Dictionary) -> Option<Widths> {
 
 fn emit_string(
     bytes: &[u8],
-    ts: &mut TextState,
-    gs_stack: &[Matrix],
+    tm: &mut TextMatrices,
+    gs: &GraphicsState,
     fonts: &FontTable,
-    page_height: f32,
+    geom: &PageGeometry,
     out: &mut Vec<Char>,
 ) {
-    let ctm = *gs_stack.last().unwrap_or(&Matrix::IDENTITY);
+    let ctm = gs.ctm;
+    let ts = &gs.text;
     let font = fonts.get(&ts.font_name);
 
     let decoded: String = font
@@ -534,15 +600,18 @@ fn emit_string(
         let glyph_width = w * ts.font_size;
 
         // Position in text space is (0, rise); transform through tm then ctm.
-        let trm = ts.tm.then(ctm);
+        let trm = tm.tm.then(ctm);
         let origin = trm.transform(Point::new(0.0, ts.rise));
         let upper = trm.transform(Point::new(0.0, ts.rise + ts.font_size));
 
         let x_scale = trm.x_scale();
-        let effective_size = trm.y_scale().max(x_scale);
+        // `Tf` sets the size in text space; the matrices then scale it onto
+        // the page. Reporting only the matrix scale would say "0.75" for a
+        // 12pt font drawn under a 0.75 CTM.
+        let effective_size = ts.font_size * trm.y_scale().max(x_scale);
         // Top-down conversion: PDF y grows upwards from page bottom.
-        let top = page_height - upper.y;
-        let bottom = page_height - origin.y;
+        let top = geom.height - upper.y;
+        let bottom = geom.height - origin.y;
 
         let glyph_render_width = glyph_width * x_scale;
         let x0 = origin.x;
@@ -557,7 +626,7 @@ fn emit_string(
                 x1,
                 top,
                 bottom,
-                doctop: top,
+                doctop: top + geom.doctop_offset,
                 size: effective_size,
                 fontname: fontname.clone(),
                 upright,
@@ -566,10 +635,10 @@ fn emit_string(
 
         // Advance text matrix in *text* space (before ctm).
         let adv_t = (w * ts.font_size + ts.char_space + word_space_for(ch, ts)) * ts.h_scale;
-        ts.tm = Matrix::translation(adv_t, 0.0).then(ts.tm);
+        tm.advance(adv_t);
     }
 }
 
-fn word_space_for(ch: char, ts: &TextState) -> f32 {
+fn word_space_for(ch: char, ts: &TextParams) -> f32 {
     if ch == ' ' { ts.word_space } else { 0.0 }
 }

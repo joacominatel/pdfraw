@@ -1,7 +1,7 @@
 //! Char → Word → Line → layout text reconstruction.
 //!
-//! This module owns the algorithms; backends in [`crate::parser`] feed it
-//! a flat slice of [`Char`]s and it produces user-facing text.
+//! This module owns the algorithms; the internal parser backend feeds it a
+//! flat slice of [`Char`]s and it produces user-facing text.
 
 use crate::char::Char;
 use crate::text::cluster::cluster_objects;
@@ -58,40 +58,47 @@ pub fn extract_words(chars: &[Char], opts: &WordOptions) -> Vec<Word> {
         indices.sort_by(|&a, &b| compare_chars(&working[a], &working[b]));
     }
 
-    let ordered: Vec<&Char> = indices.iter().map(|&i| &working[i]).collect();
-    let lines = cluster_objects(&ordered, |c| c.top, opts.y_tolerance);
+    // Carry each char's index in `working` alongside the reference. The
+    // index is what `Word::char_range` is built from; recovering it later by
+    // scanning for a matching pointer would be both quadratic and wrong when
+    // the positional sort reorders a word's chars.
+    let ordered: Vec<Indexed<'_>> = indices.iter().map(|&i| (i, &working[i])).collect();
+    let lines = cluster_objects(&ordered, |(_, c)| c.top, opts.y_tolerance);
 
     let mut out = Vec::new();
     for line in lines {
-        let mut line: Vec<&Char> = line.into_iter().copied().collect();
-        line.sort_by(|a, b| a.x0.partial_cmp(&b.x0).unwrap_or(Ordering::Equal));
+        let mut line: Vec<Indexed<'_>> = line.into_iter().copied().collect();
+        line.sort_by(|(_, a), (_, b)| a.x0.partial_cmp(&b.x0).unwrap_or(Ordering::Equal));
 
-        let mut current: Vec<&Char> = Vec::new();
-        for c in line {
-            if let Some(prev) = current.last() {
+        let mut current: Vec<Indexed<'_>> = Vec::new();
+        for (idx, c) in line {
+            if let Some((_, prev)) = current.last() {
                 if char_begins_new_word(prev, c, opts) {
-                    if let Some(w) = build_word(&current, &working) {
+                    if let Some(w) = build_word(&current) {
                         out.push(w);
                     }
                     current.clear();
                 }
             }
             if !opts.keep_blank_chars && c.text.chars().all(char::is_whitespace) {
-                if let Some(w) = build_word(&current, &working) {
+                if let Some(w) = build_word(&current) {
                     out.push(w);
                 }
                 current.clear();
                 continue;
             }
-            current.push(c);
+            current.push((idx, c));
         }
-        if let Some(w) = build_word(&current, &working) {
+        if let Some(w) = build_word(&current) {
             out.push(w);
         }
     }
 
     out
 }
+
+/// A char paired with its index in the working slice.
+type Indexed<'a> = (usize, &'a Char);
 
 fn char_begins_new_word(prev: &Char, curr: &Char, opts: &WordOptions) -> bool {
     if (prev.top - curr.top).abs() > opts.y_tolerance {
@@ -108,19 +115,32 @@ fn char_begins_new_word(prev: &Char, curr: &Char, opts: &WordOptions) -> bool {
     curr.x0 > prev.x1 + x_tol
 }
 
-fn build_word(chars: &[&Char], working: &[Char]) -> Option<Word> {
-    let first = *chars.first()?;
-    let last = *chars.last()?;
-    let text: String = chars.iter().map(|c| c.text.as_str()).collect();
-    let x0 = chars.iter().map(|c| c.x0).fold(f32::INFINITY, f32::min);
-    let x1 = chars.iter().map(|c| c.x1).fold(f32::NEG_INFINITY, f32::max);
-    let top = chars.iter().map(|c| c.top).fold(f32::INFINITY, f32::min);
+fn build_word(chars: &[Indexed<'_>]) -> Option<Word> {
+    if chars.is_empty() {
+        return None;
+    }
+    let text: String = chars.iter().map(|(_, c)| c.text.as_str()).collect();
+    let x0 = chars
+        .iter()
+        .map(|(_, c)| c.x0)
+        .fold(f32::INFINITY, f32::min);
+    let x1 = chars
+        .iter()
+        .map(|(_, c)| c.x1)
+        .fold(f32::NEG_INFINITY, f32::max);
+    let top = chars
+        .iter()
+        .map(|(_, c)| c.top)
+        .fold(f32::INFINITY, f32::min);
     let bottom = chars
         .iter()
-        .map(|c| c.bottom)
+        .map(|(_, c)| c.bottom)
         .fold(f32::NEG_INFINITY, f32::max);
 
-    let char_range = char_range_for(first, last, working);
+    // The word's chars need not be contiguous in stream order, so the range
+    // spans from the lowest to the highest index they occupy.
+    let lo = chars.iter().map(|(i, _)| *i).min()?;
+    let hi = chars.iter().map(|(i, _)| *i).max()?;
 
     Some(Word {
         text: CompactString::from(text.as_str()),
@@ -128,25 +148,8 @@ fn build_word(chars: &[&Char], working: &[Char]) -> Option<Word> {
         x1,
         top,
         bottom,
-        char_range,
+        char_range: lo..(hi + 1),
     })
-}
-
-/// Map a word's first/last char references back to their indices in the
-/// `working` slice the parser produced.
-///
-/// When the working slice equals the input slice (no ligature expansion)
-/// these indices match the public `chars()` output 1:1.
-fn char_range_for(first: &Char, last: &Char, working: &[Char]) -> std::ops::Range<usize> {
-    let first_idx = working
-        .iter()
-        .position(|c| std::ptr::eq(c, first))
-        .unwrap_or(0);
-    let last_idx = working
-        .iter()
-        .rposition(|c| std::ptr::eq(c, last))
-        .unwrap_or(first_idx);
-    first_idx..(last_idx + 1)
 }
 
 fn expand_char(c: &Char) -> Char {

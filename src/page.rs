@@ -141,8 +141,13 @@ impl<'doc> Page<'doc> {
         Ok(crate::text::extractor::extract_text_layout(chars, opts))
     }
 
-    /// Return `Ok(true)` if the page has no text operators but contains an
-    /// image XObject covering more than half of its area.
+    /// Return `Ok(true)` when the page emits no text-showing operators but
+    /// does draw image-like content (any `Do` XObject invocation or an
+    /// inline `BI` image) — i.e. OCR is probably what you want.
+    ///
+    /// A page that draws nothing at all returns `false`. See
+    /// `docs/decisions/0008-widened-scan-detection.md` for why the check
+    /// does not descend into the XObject to confirm `/Subtype /Image`.
     pub fn is_scanned(&self) -> Result<bool> {
         crate::parser::scan_detect::is_scanned(self)
     }

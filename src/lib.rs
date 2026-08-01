@@ -26,7 +26,7 @@
 //!
 //! - [`document`]: top-level [`Document`] and metadata.
 //! - [`page`]: per-page [`Page`] handle with text extraction methods.
-//! - [`char`]: positioned glyph [`Char`] (post-decoding).
+//! - [`mod@char`]: positioned glyph [`Char`] (post-decoding).
 //! - [`word`]: clustered [`Word`] with options.
 //! - [`text`]: clustering, word extraction, layout reconstruction.
 //! - [`error`]: error type and result alias.

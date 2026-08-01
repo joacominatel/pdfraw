@@ -7,6 +7,9 @@
 use lopdf::{Dictionary, Document as LDoc, Object};
 use std::collections::HashMap;
 
+/// Largest CID a `/W` range is allowed to name. CIDs are 16-bit.
+const MAX_CID: u32 = 0xFFFF;
+
 /// Extract widths from a Type0 font dict's `DescendantFonts[0].W`.
 ///
 /// Returns a map of CID → width (in 1/1000 of font size).
@@ -74,8 +77,16 @@ pub fn extract_type0(doc: &LDoc, font_dict: &Dictionary) -> Option<HashMap<u32, 
                     None => break,
                 };
                 i += 1;
-                for cid in first_cid..=last_cid {
-                    out.insert(cid, w);
+                // A CID is a 16-bit value. A malformed /W naming a range of
+                // billions would otherwise allocate one entry per CID and
+                // exhaust memory, so anything outside the CID space is
+                // dropped rather than trusted.
+                if last_cid >= first_cid && last_cid <= MAX_CID {
+                    for cid in first_cid..=last_cid {
+                        out.insert(cid, w);
+                    }
+                } else {
+                    log::warn!("ignoring malformed /W range {first_cid}..={last_cid}");
                 }
             }
             _ => {
@@ -121,6 +132,36 @@ mod tests {
         let w = extract_type0(&doc, &font).unwrap();
         assert_eq!(w.get(&10), Some(&0.5));
         assert_eq!(w.get(&11), Some(&0.6));
+    }
+
+    #[test]
+    fn extract_type0_ignores_a_cid_range_wider_than_the_cid_space() {
+        // A malformed /W array can name a range of billions of CIDs. Filling
+        // it would allocate one map entry per CID and exhaust memory; a CID
+        // is a 16-bit value, so anything past 0xFFFF is nonsense.
+        let (doc, font) = build_font(vec![
+            Object::Integer(0),
+            Object::Integer(4_000_000_000_u32 as i64),
+            Object::Integer(500),
+        ]);
+        let w = extract_type0(&doc, &font);
+        let len = w.map(|m| m.len()).unwrap_or(0);
+        assert!(
+            len <= 65_536,
+            "a /W range must stay within the CID space, got {len} entries"
+        );
+    }
+
+    #[test]
+    fn extract_type0_ignores_a_descending_cid_range() {
+        // c2 < c1 is malformed; the range must simply produce nothing rather
+        // than silently wrapping or panicking.
+        let (doc, font) = build_font(vec![
+            Object::Integer(50),
+            Object::Integer(10),
+            Object::Integer(500),
+        ]);
+        assert!(extract_type0(&doc, &font).is_none());
     }
 
     #[test]

@@ -28,12 +28,7 @@ use lopdf::content::Content;
 pub(crate) fn is_scanned(page: &Page<'_>) -> Result<bool> {
     let doc = &page.document().inner;
     let page_id = page.page_id();
-    let raw = doc
-        .get_page_content(page_id)
-        .map_err(|e| Error::ContentStream {
-            page: page.index(),
-            reason: format!("get_page_content: {e}"),
-        })?;
+    let raw = doc.get_page_content(page_id);
     let content = Content::decode(&raw).map_err(|e| Error::ContentStream {
         page: page.index(),
         reason: format!("decode content: {e}"),
