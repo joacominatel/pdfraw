@@ -7,6 +7,74 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 While the crate is pre-1.0, behavioural changes may land in patch releases;
 see the Status section of the README.
 
+## [0.1.3] - 2026-08-01
+
+Clears the entire known-defect backlog. The adversarial suite found 28
+defects; 0.1.1 and 0.1.2 fixed 13, and this release fixes the remaining 15.
+`rg '#\[ignore = "BUG' tests/` now returns nothing but the four file headers
+describing the convention.
+
+### Changed values on existing fields
+
+No public signature changed, but `Char` reports different numbers in cases
+where it was previously wrong. If you depend on exact coordinates, re-baseline
+against this release.
+
+- Glyphs on a **rotated page** are now in displayed coordinates rather than
+  unrotated ones, and `Page::width`/`height` swap for a quarter turn.
+- Glyphs on a page whose **`/MediaBox` does not start at `(0, 0)`** are no
+  longer offset by that corner; a glyph inside the page could previously
+  report a negative `top`.
+- The glyph box now carries **`Tz` horizontal scaling**, which the advance
+  already did.
+- A **negative font size** no longer inverts the box: `x0 <= x1` and
+  `top <= bottom` hold in all cases, as `Char` always documented.
+- Fonts with **undefined codes or one-to-many `/ToUnicode` entries** now put
+  each glyph on its own width instead of shifting every following glyph onto
+  the previous code's.
+
+### Fixed
+
+- **`/Rotate` was reported but never applied**, so a landscape page came out
+  sideways with nothing to indicate it. It is now composed as the outermost
+  transform, and normalized to `{0, 90, 180, 270}`.
+- **Text shown outside `BT`/`ET` was dropped** — and `is_scanned()` still
+  counted the `Tj`, so the page reported neither text nor a need for OCR.
+- **Byte codes and decoded characters were assumed to align index for
+  index.** They do not: an encoding with no glyph for a code yields a shorter
+  string, and a one-to-many `/ToUnicode` entry a longer one. Decoding is now
+  per code, so the two cannot drift.
+- **Word spacing was keyed on the decoded character**, so `Tw` was skipped
+  entirely when `/Differences` remapped code 32 (PDF 32000-1 §9.3.3).
+- **`/MediaBox` indirect numbers were not dereferenced**, so the page fell
+  back to 612×792 and every glyph on it was mispositioned.
+- **A zero-area `/MediaBox`** was accepted verbatim, while a *missing* one
+  already fell back to a usable default.
+- **`uXXXXX` glyph names were truncated to four hex digits**, so every
+  supplementary-plane name decoded to an unrelated codepoint.
+- **`Matrix::is_upright`** never checked the `d != 0` it documented, and
+  floored its scale divisor at `1e-6` — which made any smaller matrix upright
+  regardless of rotation.
+- **An empty-text `Char` counted as blank** and split the word it sat inside.
+- **`use_text_flow` only half worked**: it skipped the global sort and then
+  sorted every line by `x0` anyway.
+- **`Char::upright` was documented as a layout filter and never read**, so a
+  sideways glyph joined whatever horizontal line it overlapped.
+- **The two line-clustering stages disagreed.** `extract_words` chains within
+  `y_tolerance`; `extract_text_layout` compared against the first word only,
+  so a drifting baseline split differently in each. They now agree by
+  construction.
+
+### Added
+
+- **CI.** Seven jobs on every pull request and on the long-lived branches:
+  rustfmt, clippy with `-D warnings`, tests in debug *and* release, a build
+  pinned to the declared MSRV, rustdoc with `-D warnings`, and a check that
+  the published package carries no stray files. The last two are regression
+  tests for mistakes this project already made — the yanked 0.1.1 and the
+  local PDF corpus that nearly shipped.
+- Dependabot for both the `github-actions` and `cargo` ecosystems.
+
 ## [0.1.2] - 2026-07-31
 
 ### Fixed
