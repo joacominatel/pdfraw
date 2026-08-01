@@ -25,7 +25,7 @@ pub(crate) fn page_metrics(
             page: page_index,
             reason: "missing /MediaBox".into(),
         })?;
-    let (media_width, media_height) = media_box_dimensions(doc, page_index, &media_box)?;
+    let media = media_box_dimensions(doc, page_index, &media_box)?;
     let rotation = resolve_inheritable(doc, page, b"Rotate")
         .and_then(|o| match o {
             Object::Integer(i) => Some(i),
@@ -35,8 +35,10 @@ pub(crate) fn page_metrics(
         .map(normalize_rotation)
         .unwrap_or(0);
     Ok(PageMetrics {
-        media_width,
-        media_height,
+        media_width: media.width,
+        media_height: media.height,
+        origin_x: media.origin_x,
+        origin_y: media.origin_y,
         rotation,
     })
 }
@@ -95,7 +97,7 @@ fn deref(doc: &LDoc, obj: Object) -> Object {
     }
 }
 
-fn media_box_dimensions(doc: &LDoc, page_index: usize, o: &Object) -> Result<(f32, f32)> {
+fn media_box_dimensions(doc: &LDoc, page_index: usize, o: &Object) -> Result<MediaBox> {
     let arr = match o {
         Object::Array(a) => a,
         _ => {
@@ -139,7 +141,23 @@ fn media_box_dimensions(doc: &LDoc, page_index: usize, o: &Object) -> Result<(f3
             reason: format!("/MediaBox has no usable area ({width} x {height})"),
         });
     }
-    Ok((width, height))
+    // The lower-left corner is the page's origin, and it is not always
+    // (0, 0). Dropping it shifted every glyph by that corner, which could
+    // even put an on-page glyph at a negative `top`.
+    Ok(MediaBox {
+        origin_x: x0.min(x1),
+        origin_y: y0.min(y1),
+        width,
+        height,
+    })
+}
+
+/// A page's `/MediaBox`, split into where it starts and how big it is.
+struct MediaBox {
+    origin_x: f32,
+    origin_y: f32,
+    width: f32,
+    height: f32,
 }
 
 /// Extract every glyph on the page as a [`Char`].
@@ -151,9 +169,10 @@ pub(crate) fn extract_chars(page: &Page<'_>) -> Result<Vec<Char>> {
         height: metrics.display_height(),
         doctop_offset: page.document().doctop_offset(page.index()),
     };
-    // `/Rotate` is folded in as the outermost transform, so every glyph
-    // position, size and uprightness comes out already in displayed space.
-    let page_rotation = metrics.rotation_matrix();
+    // The media-box origin and `/Rotate` are folded in as the outermost
+    // transform, so every glyph position, size and uprightness comes out
+    // already in displayed space.
+    let page_rotation = metrics.page_transform();
 
     let raw = doc.get_page_content(page_id);
     let content = Content::decode(&raw).map_err(|e| Error::ContentStream {
@@ -690,7 +709,11 @@ fn emit_string(
         let top = geom.height - upper.y;
         let bottom = geom.height - origin.y;
 
-        let glyph_render_width = glyph_width * x_scale;
+        // `Tz` scales glyphs horizontally. It lives in the text state rather
+        // than in `tm`, so it has to be applied to the box explicitly — the
+        // advance below already carries it, which is why the two disagreed:
+        // with `200 Tz` advances doubled while reported widths did not move.
+        let glyph_render_width = glyph_width * ts.h_scale * x_scale;
         let x0 = origin.x;
         let x1 = x0 + glyph_render_width;
 
@@ -721,11 +744,24 @@ fn emit_string(
         }
 
         // Advance text matrix in *text* space (before ctm).
-        let adv_t = (w * ts.font_size + ts.char_space + word_space_for(ch, ts)) * ts.h_scale;
+        let word_space = word_space_for(code, is_composite, ts);
+        let adv_t = (w * ts.font_size + ts.char_space + word_space) * ts.h_scale;
         tm.advance(adv_t);
     }
 }
 
-fn word_space_for(ch: char, ts: &TextParams) -> f32 {
-    if ch == ' ' { ts.word_space } else { 0.0 }
+/// Word spacing per PDF 32000-1 §9.3.3: it applies to the single-byte code
+/// 32, whatever that byte happens to decode to.
+///
+/// Keying it on the decoded character instead meant a font whose
+/// `/Differences` remaps code 32 to some other glyph never received `Tw` at
+/// all. The mirror case matters too: in a composite font a two-byte CID may
+/// contain `0x20` without being a word space, and must not receive it.
+fn word_space_for(code: u32, is_composite: bool, ts: &TextParams) -> f32 {
+    // Composite fonts only get word spacing for a genuine single-byte 32,
+    // which `codes` never produces from a two-byte CID.
+    if is_composite {
+        return 0.0;
+    }
+    if code == 32 { ts.word_space } else { 0.0 }
 }

@@ -86,7 +86,6 @@ fn media_box_with_zero_area_falls_back_to_a_usable_page() {
 }
 
 #[test]
-#[ignore = "BUG: page_metrics keeps only the /MediaBox extent and ignores its origin, so glyphs on a page whose box does not start at (0,0) get shifted tops"]
 fn char_top_is_measured_from_the_media_box_origin() {
     let doc = PdfBuilder::new()
         .font("F1", simple_font("WinAnsiEncoding", 65, &[1000]))

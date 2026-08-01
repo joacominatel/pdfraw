@@ -27,6 +27,10 @@ pub(crate) struct PageMetrics {
     pub media_width: f32,
     /// `/MediaBox` height in points, before `/Rotate`.
     pub media_height: f32,
+    /// x of the `/MediaBox` lower-left corner. Usually `0`, but not always.
+    pub origin_x: f32,
+    /// y of the `/MediaBox` lower-left corner.
+    pub origin_y: f32,
     /// Rotation in degrees, normalized to `0`, `90`, `180`, or `270`.
     pub rotation: i16,
 }
@@ -55,20 +59,25 @@ impl PageMetrics {
         }
     }
 
-    /// Transform from unrotated PDF user space into displayed page space,
-    /// both still bottom-up. Composing this after the CTM is what makes
-    /// `/Rotate` apply to glyph positions, not just to the page dimensions.
+    /// Transform from raw PDF user space into displayed page space, both
+    /// still bottom-up. Composing this after the CTM is what makes the
+    /// `/MediaBox` origin and `/Rotate` apply to glyph positions, not just
+    /// to the page dimensions.
     ///
-    /// `/Rotate` turns the page clockwise, so for 90° the bottom-left corner
-    /// of the media box ends up at the top-left of what the reader shows.
-    pub(crate) fn rotation_matrix(&self) -> Matrix {
+    /// Two steps. First the lower-left corner of the media box is moved to
+    /// `(0, 0)` — it is not always there, and ignoring it shifted every
+    /// glyph by that corner. Then `/Rotate` turns the page clockwise, so for
+    /// 90° the corner ends up at the top-left of what the reader shows.
+    pub(crate) fn page_transform(&self) -> Matrix {
+        let to_origin = Matrix::translation(-self.origin_x, -self.origin_y);
         let (w, h) = (self.media_width, self.media_height);
-        match self.rotation {
+        let rotate = match self.rotation {
             90 => Matrix::new(0.0, -1.0, 1.0, 0.0, 0.0, w),
             180 => Matrix::new(-1.0, 0.0, 0.0, -1.0, w, h),
             270 => Matrix::new(0.0, 1.0, -1.0, 0.0, h, 0.0),
             _ => Matrix::IDENTITY,
-        }
+        };
+        to_origin.then(rotate)
     }
 }
 
@@ -103,6 +112,8 @@ impl<'doc> Page<'doc> {
                 .unwrap_or(PageMetrics {
                     media_width: 612.0,
                     media_height: 792.0,
+                    origin_x: 0.0,
+                    origin_y: 0.0,
                     rotation: 0,
                 })
         })
