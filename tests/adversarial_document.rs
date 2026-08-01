@@ -172,7 +172,6 @@ fn rotate_inherited_through_an_indirect_reference_is_read() {
 }
 
 #[test]
-#[ignore = "BUG: /Rotate is reported but never applied — page.width()/height() are not swapped for a quarter-turn page, and char coordinates stay in unrotated space"]
 fn page_dimensions_swap_when_rotate_is_ninety() {
     let doc = PdfBuilder::new()
         .font("F1", simple_font("WinAnsiEncoding", 65, &[1000]))
@@ -189,7 +188,6 @@ fn page_dimensions_swap_when_rotate_is_ninety() {
 }
 
 #[test]
-#[ignore = "BUG: /Rotate is passed through unvalidated, so rotation() can return a value outside the documented {0, 90, 180, 270} set"]
 fn rotation_is_normalized_when_rotate_is_not_a_quarter_turn() {
     let doc = PdfBuilder::new()
         .content(TEXT)
@@ -203,7 +201,6 @@ fn rotation_is_normalized_when_rotate_is_not_a_quarter_turn() {
 }
 
 #[test]
-#[ignore = "BUG: a negative /Rotate is passed through instead of being normalized into {0, 90, 180, 270}"]
 fn rotation_is_normalized_when_rotate_is_negative() {
     let doc = PdfBuilder::new()
         .content(TEXT)
@@ -319,7 +316,6 @@ fn page_without_resources_still_extracts_text() {
 }
 
 #[test]
-#[ignore = "BUG: text drawn without BT is invisible to chars() but is still counted as text by is_scanned(), so such a page reports neither text nor a need for OCR"]
 fn is_scanned_agrees_with_char_extraction_when_bt_is_missing() {
     let doc = PdfBuilder::new()
         .font("F1", simple_font("WinAnsiEncoding", 65, &[1000]))

@@ -87,7 +87,7 @@ impl Document {
                 sums.push(running);
                 running +=
                     crate::parser::lopdf_backend::page_metrics(&self.inner, self.page_ids[i], i)
-                        .map(|m| m.height)
+                        .map(|m| m.display_height())
                         .unwrap_or(792.0);
             }
             sums
