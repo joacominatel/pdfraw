@@ -195,10 +195,11 @@ It implements:
 - A heuristic that flags scanned/image-only pages so callers can route
   them to OCR.
 
+- Form XObject execution, so text a page delegates to a form via `Do`
+  comes out with the rest. Recursion is capped and cycles are detected.
+
 It does not:
 
-- Descend into Form XObjects (text inside a form is invisible to the
-  extractor).
 - Rotate or vertical text in the layout output. The chars come out
   flagged with `upright = false` but the layout reconstruction
   ignores them.

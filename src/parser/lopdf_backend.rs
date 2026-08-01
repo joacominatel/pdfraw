@@ -97,6 +97,50 @@ fn deref(doc: &LDoc, obj: Object) -> Object {
     }
 }
 
+/// Follow one level of indirection without cloning.
+///
+/// [`deref`] hands back an owned `Object`, which is fine for the small
+/// numbers it was written for but useless for resource dictionaries: those
+/// have to outlive the borrow so a [`FontTable`] can hold references into
+/// them.
+fn deref_ref<'a>(doc: &'a LDoc, obj: &'a Object) -> Option<&'a Object> {
+    match obj {
+        Object::Reference(id) => doc.get_object(*id).ok(),
+        other => Some(other),
+    }
+}
+
+/// Borrowing counterpart to [`resolve_inheritable`], for keys whose value the
+/// caller needs to keep referring to.
+fn inheritable_ref<'a>(doc: &'a LDoc, page: &'a Dictionary, key: &[u8]) -> Option<&'a Object> {
+    let mut cursor: &'a Dictionary = page;
+    for _ in 0..MAX_PAGE_TREE_DEPTH {
+        if let Ok(v) = cursor.get(key) {
+            return deref_ref(doc, v);
+        }
+        let Ok(Object::Reference(id)) = cursor.get(b"Parent") else {
+            return None;
+        };
+        let Ok(parent) = doc.get_dictionary(*id) else {
+            return None;
+        };
+        cursor = parent;
+    }
+    log::warn!("/Parent chain exceeded {MAX_PAGE_TREE_DEPTH} levels — treating as cyclic");
+    None
+}
+
+/// Look a sub-dictionary up inside a resource dictionary, resolving a
+/// reference if that is how the file stores it.
+fn sub_dictionary<'a>(
+    doc: &'a LDoc,
+    resources: &'a Dictionary,
+    key: &[u8],
+) -> Option<&'a Dictionary> {
+    let entry = resources.get(key).ok()?;
+    deref_ref(doc, entry)?.as_dict().ok()
+}
+
 fn media_box_dimensions(doc: &LDoc, page_index: usize, o: &Object) -> Result<MediaBox> {
     let arr = match o {
         Object::Array(a) => a,
@@ -160,19 +204,43 @@ struct MediaBox {
     height: f32,
 }
 
+/// How deep `Do` may nest before we stop trusting the file.
+///
+/// Real documents nest a form or two. A cycle is caught separately by
+/// [`Interp::active`], but a file can also nest legitimately-distinct forms
+/// thousands deep, which would exhaust the stack instead of looping.
+const MAX_XOBJECT_DEPTH: usize = 16;
+
+/// Everything about the page that stays fixed while its content runs.
+struct Ctx<'a> {
+    doc: &'a LDoc,
+    geom: PageGeometry,
+    /// Media-box origin and `/Rotate`, folded in as the outermost transform.
+    page_rotation: Matrix,
+}
+
+/// Interpreter state that a nested `Do` must share with its caller.
+struct Interp {
+    gs_stack: Vec<GraphicsState>,
+    out: Vec<Char>,
+    /// Form XObjects currently being executed, innermost last. A form that
+    /// names one of these is asking us to recurse forever.
+    active: Vec<ObjectId>,
+}
+
 /// Extract every glyph on the page as a [`Char`].
 pub(crate) fn extract_chars(page: &Page<'_>) -> Result<Vec<Char>> {
     let doc = &page.document().inner;
     let page_id = page.page_id();
     let metrics = page.metrics();
-    let geom = PageGeometry {
-        height: metrics.display_height(),
-        doctop_offset: page.document().doctop_offset(page.index()),
+    let ctx = Ctx {
+        doc,
+        geom: PageGeometry {
+            height: metrics.display_height(),
+            doctop_offset: page.document().doctop_offset(page.index()),
+        },
+        page_rotation: metrics.page_transform(),
     };
-    // The media-box origin and `/Rotate` are folded in as the outermost
-    // transform, so every glyph position, size and uprightness comes out
-    // already in displayed space.
-    let page_rotation = metrics.page_transform();
 
     let raw = doc.get_page_content(page_id);
     let content = Content::decode(&raw).map_err(|e| Error::ContentStream {
@@ -187,35 +255,75 @@ pub(crate) fn extract_chars(page: &Page<'_>) -> Result<Vec<Char>> {
         }
     }
 
+    // Needed for `/XObject` lookup, and inheritable like `/MediaBox` is.
+    let resources = doc
+        .get_dictionary(page_id)
+        .ok()
+        .and_then(|p| inheritable_ref(doc, p, b"Resources"))
+        .and_then(|o| o.as_dict().ok());
+
+    let mut interp = Interp {
+        gs_stack: vec![GraphicsState::default()],
+        out: Vec::new(),
+        active: Vec::new(),
+    };
+    run_content(&ctx, &content, &fonts, resources, &mut interp, 0);
+    Ok(interp.out)
+}
+
+/// Execute one content stream: the page's own, or a Form XObject's.
+///
+/// `resources` is the dictionary that `Do` resolves XObject names against,
+/// and `fonts` the table `Tf` resolves against. A form supplies its own of
+/// each when it has them and inherits the caller's when it does not.
+fn run_content(
+    ctx: &Ctx<'_>,
+    content: &Content,
+    fonts: &FontTable<'_>,
+    resources: Option<&Dictionary>,
+    interp: &mut Interp,
+    depth: usize,
+) {
+    let geom = &ctx.geom;
+    let page_rotation = ctx.page_rotation;
+
+    // The text matrices are per content stream: `BT` resets them, and a form
+    // starts a fresh one rather than inheriting the caller's position.
     let mut tm = TextMatrices::default();
-    let mut gs_stack: Vec<GraphicsState> = vec![GraphicsState::default()];
-    let mut out = Vec::new();
 
     // The stack is never allowed to empty (see the "Q" arm), so these two
-    // helpers can always hand back a live graphics state.
+    // helpers can always hand back a live graphics state. They read through
+    // `interp` rather than holding a borrow of it, so a nested `Do` can pass
+    // the whole interpreter down.
     macro_rules! gs {
         () => {
-            gs_stack.last().expect("graphics stack is never empty")
+            interp
+                .gs_stack
+                .last()
+                .expect("graphics stack is never empty")
         };
     }
     macro_rules! gs_mut {
         () => {
-            gs_stack.last_mut().expect("graphics stack is never empty")
+            interp
+                .gs_stack
+                .last_mut()
+                .expect("graphics stack is never empty")
         };
     }
 
-    for op in content.operations {
+    for op in &content.operations {
         match op.operator.as_str() {
             // graphics state — q/Q save and restore the CTM *and* the text
             // state parameters (PDF 32000-1, Table 52).
             "q" => {
                 let top = gs!().clone();
-                gs_stack.push(top);
+                interp.gs_stack.push(top);
             }
             "Q" => {
-                gs_stack.pop();
-                if gs_stack.is_empty() {
-                    gs_stack.push(GraphicsState::default());
+                interp.gs_stack.pop();
+                if interp.gs_stack.is_empty() {
+                    interp.gs_stack.push(GraphicsState::default());
                 }
             }
             "cm" => {
@@ -291,10 +399,10 @@ pub(crate) fn extract_chars(page: &Page<'_>) -> Result<Vec<Char>> {
                         &bytes,
                         &mut tm,
                         gs!(),
-                        &fonts,
-                        &geom,
+                        fonts,
+                        geom,
                         page_rotation,
-                        &mut out,
+                        &mut interp.out,
                     );
                 }
             }
@@ -307,10 +415,10 @@ pub(crate) fn extract_chars(page: &Page<'_>) -> Result<Vec<Char>> {
                         &bytes,
                         &mut tm,
                         gs!(),
-                        &fonts,
-                        &geom,
+                        fonts,
+                        geom,
                         page_rotation,
-                        &mut out,
+                        &mut interp.out,
                     );
                 }
             }
@@ -328,10 +436,10 @@ pub(crate) fn extract_chars(page: &Page<'_>) -> Result<Vec<Char>> {
                         &bytes,
                         &mut tm,
                         gs!(),
-                        &fonts,
-                        &geom,
+                        fonts,
+                        geom,
                         page_rotation,
-                        &mut out,
+                        &mut interp.out,
                     );
                 }
             }
@@ -343,10 +451,10 @@ pub(crate) fn extract_chars(page: &Page<'_>) -> Result<Vec<Char>> {
                                 bytes,
                                 &mut tm,
                                 gs!(),
-                                &fonts,
-                                &geom,
+                                fonts,
+                                geom,
                                 page_rotation,
-                                &mut out,
+                                &mut interp.out,
                             ),
                             Object::Integer(_) | Object::Real(_) => {
                                 let t = &gs!().text;
@@ -360,11 +468,150 @@ pub(crate) fn extract_chars(page: &Page<'_>) -> Result<Vec<Char>> {
                 }
             }
 
+            // Draw an XObject. For a Form this means executing its content
+            // stream inline; text drawn there is text on the page, and every
+            // reader shows it.
+            "Do" => {
+                let Some(name) = op.operands.first().and_then(name_of) else {
+                    continue;
+                };
+                run_form(ctx, &name, fonts, resources, interp, depth);
+            }
+
             _ => { /* unsupported operator — silently skip operands */ }
         }
     }
+}
 
-    Ok(out)
+/// Resolve `name` in the current `/XObject` resources and, if it is a form,
+/// execute it.
+///
+/// Anything that does not check out — a missing name, an `/Image`, a broken
+/// stream — is skipped in silence, exactly as an unsupported operator is. The
+/// page's own text must not be lost because one of its forms is malformed.
+fn run_form(
+    ctx: &Ctx<'_>,
+    name: &[u8],
+    fonts: &FontTable<'_>,
+    resources: Option<&Dictionary>,
+    interp: &mut Interp,
+    depth: usize,
+) {
+    let doc = ctx.doc;
+    let Some(entry) = resources.and_then(|r| sub_dictionary(doc, r, b"XObject")) else {
+        return;
+    };
+    let Ok(named) = entry.get(name) else {
+        return;
+    };
+    // Kept before resolving, because the id is what identifies a form for
+    // cycle detection. A form stored inline cannot be recursive anyway.
+    let id = match named {
+        Object::Reference(id) => Some(*id),
+        _ => None,
+    };
+    let Some(stream) = deref_ref(doc, named).and_then(|o| o.as_stream().ok()) else {
+        return;
+    };
+    // An /Image XObject's bytes are samples, not operators.
+    if !matches!(
+        stream.dict.get(b"Subtype").and_then(Object::as_name).ok(),
+        Some(b"Form")
+    ) {
+        return;
+    }
+
+    if depth >= MAX_XOBJECT_DEPTH {
+        log::warn!(
+            "/{} nests Form XObjects more than {MAX_XOBJECT_DEPTH} deep — not descending further",
+            String::from_utf8_lossy(name)
+        );
+        return;
+    }
+    if let Some(id) = id
+        && interp.active.contains(&id)
+    {
+        log::warn!(
+            "Form XObject /{} invokes itself — skipping the recursive call",
+            String::from_utf8_lossy(name)
+        );
+        return;
+    }
+
+    let Ok(bytes) = stream.decompressed_content() else {
+        return;
+    };
+    let Ok(content) = Content::decode(&bytes) else {
+        log::warn!(
+            "Form XObject /{} has an undecodable content stream — skipping it",
+            String::from_utf8_lossy(name)
+        );
+        return;
+    };
+
+    // A form supplies its own resources when it has them; otherwise the
+    // invoking stream's stay in scope (PDF 32000-1, §8.10.1).
+    let own_resources = stream
+        .dict
+        .get(b"Resources")
+        .ok()
+        .and_then(|o| deref_ref(doc, o))
+        .and_then(|o| o.as_dict().ok());
+    let form_fonts = own_resources.map(|r| fonts_from_resources(doc, r));
+
+    // `Do` behaves as if the form were bracketed by q … Q, with /Matrix
+    // concatenated onto the CTM. Without the bracket the matrix would leak
+    // into whatever the page draws next.
+    let mut saved = interp
+        .gs_stack
+        .last()
+        .expect("graphics stack is never empty")
+        .clone();
+    if let Some(m) = stream.dict.get(b"Matrix").ok().and_then(|o| match o {
+        Object::Array(a) => matrix_from_operands(a),
+        _ => None,
+    }) {
+        saved.ctm = m.then(saved.ctm);
+    }
+    interp.gs_stack.push(saved);
+    if let Some(id) = id {
+        interp.active.push(id);
+    }
+
+    run_content(
+        ctx,
+        &content,
+        form_fonts.as_ref().unwrap_or(fonts),
+        own_resources.or(resources),
+        interp,
+        depth + 1,
+    );
+
+    if id.is_some() {
+        interp.active.pop();
+    }
+    interp.gs_stack.pop();
+    if interp.gs_stack.is_empty() {
+        interp.gs_stack.push(GraphicsState::default());
+    }
+}
+
+/// Build a font table from a resource dictionary's `/Font` entry.
+///
+/// The page-level table comes from `lopdf`'s `get_page_fonts`, which also
+/// walks the page tree for inherited resources. A form's resources are not
+/// inheritable, so this reads the one dictionary and stops.
+fn fonts_from_resources<'doc>(doc: &'doc LDoc, resources: &'doc Dictionary) -> FontTable<'doc> {
+    let mut table = FontTable::default();
+    let Some(font_dict) = sub_dictionary(doc, resources, b"Font") else {
+        return table;
+    };
+    for (name, value) in font_dict.iter() {
+        if let Some(dict) = deref_ref(doc, value).and_then(|o| o.as_dict().ok()) {
+            table.insert(name.clone(), FontInfo::from_dict(doc, dict));
+        }
+    }
+    table
 }
 
 // ============================================================================

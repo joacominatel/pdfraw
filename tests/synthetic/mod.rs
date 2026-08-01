@@ -16,6 +16,7 @@ use pdfraw::{Char, Document};
 pub struct PdfBuilder {
     doc: LDoc,
     fonts: Dictionary,
+    xobjects: Dictionary,
     page_entries: Dictionary,
     pages_entries: Dictionary,
     contents: Vec<Vec<u8>>,
@@ -35,6 +36,7 @@ impl PdfBuilder {
         Self {
             doc: LDoc::with_version("1.7"),
             fonts: Dictionary::new(),
+            xobjects: Dictionary::new(),
             page_entries: Dictionary::new(),
             pages_entries: Dictionary::new(),
             contents: Vec::new(),
@@ -67,6 +69,40 @@ impl PdfBuilder {
         self.fonts
             .set(name.as_bytes().to_vec(), Object::Reference(id));
         self
+    }
+
+    /// Register an XObject under `/Resources /XObject <name>`.
+    pub fn xobject(mut self, name: &str, id: ObjectId) -> Self {
+        self.xobjects
+            .set(name.as_bytes().to_vec(), Object::Reference(id));
+        self
+    }
+
+    /// Add a Form XObject stream and return its id, ready for [`Self::xobject`].
+    ///
+    /// `entries` is merged into the stream dictionary last, so a test can
+    /// override `/Subtype`, add a `/Matrix`, or drop `/Resources`.
+    pub fn add_form(&mut self, content: &str, entries: Dictionary) -> ObjectId {
+        self.doc.add_object(form_stream(content, entries))
+    }
+
+    /// Reserve an object id, so a form can name itself in its own
+    /// `/Resources /XObject` and produce a cycle.
+    pub fn doc_next_id(&mut self) -> ObjectId {
+        self.doc.new_object_id()
+    }
+
+    /// Write a form to an id previously handed out by [`Self::doc_next_id`].
+    pub fn add_form_with_id(
+        &mut self,
+        id: ObjectId,
+        content: &str,
+        entries: Dictionary,
+    ) -> ObjectId {
+        self.doc
+            .objects
+            .insert(id, Object::Stream(form_stream(content, entries)));
+        id
     }
 
     /// Drop the `/Resources` entry from the page dictionary entirely.
@@ -126,10 +162,11 @@ impl PdfBuilder {
             "Contents" => contents,
         };
         if self.with_resources {
-            page.set(
-                "Resources",
-                dictionary! { "Font" => Object::Dictionary(self.fonts.clone()) },
-            );
+            let mut resources = dictionary! { "Font" => Object::Dictionary(self.fonts.clone()) };
+            if !self.xobjects.is_empty() {
+                resources.set("XObject", Object::Dictionary(self.xobjects.clone()));
+            }
+            page.set("Resources", resources);
         }
         if !self.page_entries.has(b"MediaBox") && !self.pages_entries.has(b"MediaBox") {
             page.set("MediaBox", vec![0.into(), 0.into(), 612.into(), 792.into()]);
@@ -164,6 +201,21 @@ impl PdfBuilder {
     pub fn build(self) -> Document {
         Document::from_bytes(self.into_bytes()).expect("synthetic PDF should load")
     }
+}
+
+/// A Form XObject stream: the standard dictionary, with `entries` layered on
+/// top so a caller can override `/Subtype`, add a `/Matrix`, or leave out
+/// `/Resources`.
+fn form_stream(content: &str, entries: Dictionary) -> Stream {
+    let mut dict = dictionary! {
+        "Type" => "XObject",
+        "Subtype" => "Form",
+        "BBox" => vec![0.into(), 0.into(), 612.into(), 792.into()],
+    };
+    for (k, v) in entries.iter() {
+        dict.set(k.clone(), v.clone());
+    }
+    Stream::new(dict, content.as_bytes().to_vec())
 }
 
 /// Build a two-page document sharing one font, with the given raw content
