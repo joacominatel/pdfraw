@@ -47,7 +47,7 @@ rayon  = { version = "1", optional = true }
 
 [dev-dependencies]
 insta     = { version = "1", features = ["yaml"] }
-printpdf  = "0.7"
+printpdf  = "0.12"
 env_logger = "0.11"
 
 [features]
