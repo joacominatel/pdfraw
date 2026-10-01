@@ -36,7 +36,7 @@ name = "pdfraw"
 path = "src/bin/pdfraw.rs"
 
 [dependencies]
-lopdf       = { version = "0.44", default-features = false }
+lopdf       = { version = "0.45", default-features = false }
 thiserror   = "2"
 compact_str = "0.10"
 encoding_rs = "0.8"
